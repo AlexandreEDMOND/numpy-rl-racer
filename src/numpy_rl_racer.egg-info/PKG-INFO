@@ -1,0 +1,7 @@
+Metadata-Version: 2.4
+Name: numpy-rl-racer
+Version: 0.1.0
+Summary: A NumPy-only Deep RL racing environment and agent from scratch.
+Requires-Python: >=3.11
+Requires-Dist: numpy>=2.0.0
+Requires-Dist: matplotlib>=3.8.0

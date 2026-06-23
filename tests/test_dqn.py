@@ -112,6 +112,27 @@ def test_sgd_step_changes_weights():
     assert not np.allclose(mlp.layers[0].w, old_w)
 
 
+def test_dqn_save_and_load(tmp_path):
+    agent = DQNAgent(state_dim=4, hidden_sizes=[16], lr=1e-3)
+    for layer in agent.online_net.layers:
+        layer.w[:] = 1.0
+        layer.b[:] = 2.0
+
+    path = str(tmp_path / "test_model.npz")
+    agent.save(path)
+
+    agent2 = DQNAgent(state_dim=4, hidden_sizes=[16], lr=1e-3)
+    agent2.load(path)
+
+    for l1, l2 in zip(agent.online_net.layers, agent2.online_net.layers):
+        np.testing.assert_array_equal(l1.w, l2.w)
+        np.testing.assert_array_equal(l1.b, l2.b)
+
+    for l1, l2 in zip(agent.online_net.layers, agent2.target_net.layers):
+        np.testing.assert_array_equal(l1.w, l2.w)
+        np.testing.assert_array_equal(l1.b, l2.b)
+
+
 def test_hard_update_target():
     agent = DQNAgent(state_dim=4, hidden_sizes=[16], lr=1e-3)
     for src, dst in zip(agent.online_net.layers, agent.target_net.layers):
