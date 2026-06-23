@@ -1,6 +1,6 @@
 import numpy as np
 
-from .car import CarState, KinematicCar
+from .car import CarState, KinematicCar, _normalize_angle
 
 
 class RectangularTrack:
@@ -59,6 +59,33 @@ class RectangularTrack:
                 return True
         return False
 
+    def centerline_info(self, x, y):
+        px, py = np.float64(x), np.float64(y)
+        hw, hh = self.half_w, self.half_h
+
+        best_dist = np.inf
+        best_angle = np.float64(0.0)
+
+        for x1, y1, x2, y2 in _centerline_edges(hw, hh):
+            sx = x2 - x1
+            sy = y2 - y1
+            seg_len_sq = sx * sx + sy * sy
+            if seg_len_sq == 0.0:
+                continue
+            t = ((px - x1) * sx + (py - y1) * sy) / seg_len_sq
+            t = np.clip(t, 0.0, 1.0)
+            cx = x1 + t * sx
+            cy = y1 + t * sy
+            dx = px - cx
+            dy = py - cy
+            dist = np.sqrt(dx * dx + dy * dy)
+            angle = np.arctan2(sy, sx)
+            if dist < best_dist:
+                best_dist = dist
+                best_angle = angle
+
+        return best_dist, best_angle
+
 
 class CircularTrack:
     def __init__(self, radius=6.0, track_width=2.0):
@@ -94,6 +121,13 @@ class CircularTrack:
         dist = np.sqrt(px * px + py * py)
         tw2 = self.track_width / 2.0
         return (self.radius - tw2) <= dist <= (self.radius + tw2)
+
+    def centerline_info(self, x, y):
+        px, py = np.float64(x), np.float64(y)
+        dist = np.sqrt(px * px + py * py)
+        dist_to_centerline = np.abs(dist - self.radius)
+        angle = np.arctan2(px, -py)
+        return dist_to_centerline, angle
 
 
 class RacingEnv:
@@ -151,8 +185,24 @@ class RacingEnv:
         return self._get_observation(), reward, done, info
 
     def _get_observation(self):
+        dist_to_centerline, tangent_angle = self.track.centerline_info(
+            self.state.x, self.state.y
+        )
+        half_tw = self.track.track_width / np.float64(2.0)
+        dist_to_edge = half_tw - dist_to_centerline
+        dist_to_edge_normalized = np.clip(
+            dist_to_edge / half_tw, np.float64(0.0), np.float64(1.0)
+        )
+        heading_error = _normalize_angle(self.state.heading - tangent_angle)
         return np.array(
-            [self.state.x, self.state.y, self.state.heading, self.state.velocity],
+            [
+                self.state.x,
+                self.state.y,
+                self.state.heading,
+                self.state.velocity,
+                dist_to_edge_normalized,
+                heading_error,
+            ],
             dtype=np.float64,
         )
 

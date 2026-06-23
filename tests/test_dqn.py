@@ -32,17 +32,17 @@ def test_replay_buffer_sample_shapes():
 
 
 def test_dqn_act_greedy():
-    agent = DQNAgent(state_dim=4, hidden_sizes=[16], lr=1e-3)
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3)
     agent.epsilon = 0.0
-    state = np.array([0.0, 0.0, 0.0, 0.0])
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     action = agent.act(state, training=False)
     assert 0 <= action < N_ACTIONS
 
 
 def test_dqn_act_exploration():
-    agent = DQNAgent(state_dim=4, hidden_sizes=[16], lr=1e-3)
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3)
     agent.epsilon = 1.0
-    state = np.array([0.0, 0.0, 0.0, 0.0])
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     actions = set()
     for _ in range(200):
         actions.add(agent.act(state, training=True))
@@ -50,11 +50,11 @@ def test_dqn_act_exploration():
 
 
 def test_dqn_training_step_runs():
-    agent = DQNAgent(state_dim=4, hidden_sizes=[16], lr=1e-3, batch_size=4)
-    state = np.array([0.0, 0.0, 0.0, 0.0])
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, batch_size=4)
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     for _ in range(20):
         action = agent.act(state, training=True)
-        next_state = state + np.random.randn(4) * 0.01
+        next_state = state + np.random.randn(6) * 0.01
         reward = 0.1
         done = False
         agent.train_step(state, action, reward, next_state, done)
@@ -62,13 +62,13 @@ def test_dqn_training_step_runs():
 
 def test_dqn_training_loss_decreases():
     np.random.seed(2)
-    agent = DQNAgent(state_dim=4, hidden_sizes=[16], lr=1e-2, batch_size=16)
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-2, batch_size=16)
     agent.epsilon = 0.5
     losses = []
-    state = np.array([0.0, 0.0, 0.0, 0.0])
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     for _ in range(150):
         action = agent.act(state, training=True)
-        next_state = state + np.random.randn(4) * 0.01
+        next_state = state + np.random.randn(6) * 0.01
         reward = 0.1
         done = False
         loss = agent.train_step(state, action, reward, next_state, done)
@@ -114,7 +114,7 @@ def test_sgd_step_changes_weights():
 
 
 def test_dqn_save_and_load(tmp_path):
-    agent = DQNAgent(state_dim=4, hidden_sizes=[16], lr=1e-3)
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3)
     for layer in agent.online_net.layers:
         layer.w[:] = 1.0
         layer.b[:] = 2.0
@@ -122,7 +122,7 @@ def test_dqn_save_and_load(tmp_path):
     path = str(tmp_path / "test_model.npz")
     agent.save(path)
 
-    agent2 = DQNAgent(state_dim=4, hidden_sizes=[16], lr=1e-3)
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3)
     agent2.load(path)
 
     for l1, l2 in zip(agent.online_net.layers, agent2.online_net.layers):
@@ -135,7 +135,7 @@ def test_dqn_save_and_load(tmp_path):
 
 
 def test_hard_update_target():
-    agent = DQNAgent(state_dim=4, hidden_sizes=[16], lr=1e-3)
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3)
     for src, dst in zip(agent.online_net.layers, agent.target_net.layers):
         dst.w[:] = 0.0
         dst.b[:] = 0.0

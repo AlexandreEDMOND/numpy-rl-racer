@@ -52,7 +52,7 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
 
     env = RacingEnv()
-    agent = DQNAgent(state_dim=4)
+    agent = DQNAgent(state_dim=6)
 
     episode_rewards = []
     episode_losses = []
