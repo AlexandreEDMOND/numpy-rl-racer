@@ -1,6 +1,7 @@
 import numpy as np
 
-from .car import CarState, KinematicCar, _normalize_angle
+from .car import CarState, KinematicCar
+from .utils import normalize_angle
 
 
 class RectangularTrack:
@@ -193,7 +194,7 @@ class RacingEnv:
         dist_to_edge_normalized = np.clip(
             dist_to_edge / half_tw, np.float64(0.0), np.float64(1.0)
         )
-        heading_error = _normalize_angle(self.state.heading - tangent_angle)
+        heading_error = normalize_angle(self.state.heading - tangent_angle)
         return np.array(
             [
                 self.state.x,
