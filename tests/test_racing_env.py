@@ -1,6 +1,6 @@
 import numpy as np
 
-from numpy_rl_racer.env.racing_env import RacingEnv, RectangularTrack
+from numpy_rl_racer.env.racing_env import CircularTrack, RacingEnv, RectangularTrack
 
 
 def test_reset_returns_numpy_observation():
@@ -122,3 +122,100 @@ def test_lap_completion_gives_bonus_reward():
     assert info['progress'] < 0.5, (
         "Progress should wrap to low value after lap completion"
     )
+
+
+# ── CircularTrack ──────────────────────────────────────────────────
+
+
+def test_circular_track_goal_position():
+    track = CircularTrack(radius=6.0)
+    gx, gy = track.goal_position
+    assert gx == np.float64(0.0)
+    assert gy == np.float64(-6.0)
+
+
+def test_circular_track_start_position():
+    track = CircularTrack(radius=6.0)
+    sx, sy, sh = track.start_position
+    assert sx == np.float64(0.0)
+    assert sy == np.float64(-6.0)
+    assert sh == np.float64(0.0)
+
+
+def test_circular_track_progress_at_start():
+    track = CircularTrack(radius=6.0)
+    np.testing.assert_almost_equal(track.progress_along_centerline(0.0, -6.0), 0.0)
+
+
+def test_circular_track_progress_at_quarter():
+    track = CircularTrack(radius=6.0)
+    np.testing.assert_almost_equal(track.progress_along_centerline(6.0, 0.0), 0.25)
+
+
+def test_circular_track_progress_at_half():
+    track = CircularTrack(radius=6.0)
+    np.testing.assert_almost_equal(track.progress_along_centerline(0.0, 6.0), 0.5)
+
+
+def test_circular_track_progress_at_three_quarters():
+    track = CircularTrack(radius=6.0)
+    np.testing.assert_almost_equal(track.progress_along_centerline(-6.0, 0.0), 0.75)
+
+
+def test_circular_track_progress_bounds():
+    track = CircularTrack(radius=6.0)
+    for x, y in [(0.0, -6.0), (6.0, 0.0), (0.0, 6.0), (-6.0, 0.0)]:
+        p = track.progress_along_centerline(x, y)
+        assert 0.0 <= p <= 1.0
+
+
+def test_circular_track_is_on_track_centerline():
+    track = CircularTrack(radius=6.0)
+    assert track.is_on_track(0.0, -6.0)
+    assert track.is_on_track(6.0, 0.0)
+    assert track.is_on_track(0.0, 6.0)
+    assert track.is_on_track(-6.0, 0.0)
+
+
+def test_circular_track_is_on_track_center():
+    track = CircularTrack(radius=6.0, track_width=2.0)
+    assert not track.is_on_track(0.0, 0.0), "Center of circle should not be on track"
+
+
+def test_circular_track_is_on_track_too_far():
+    track = CircularTrack(radius=6.0, track_width=2.0)
+    assert not track.is_on_track(8.0, 0.0), "Point beyond outer edge should not be on track"
+    assert not track.is_on_track(0.0, -8.0), "Point beyond outer edge should not be on track"
+
+
+def test_circular_track_is_on_track_edge_boundary():
+    track = CircularTrack(radius=6.0, track_width=2.0)
+    assert track.is_on_track(5.0, 0.0), "Inner edge of road should be on track"
+    assert track.is_on_track(7.0, 0.0), "Outer edge of road should be on track"
+
+
+def test_circular_track_half_properties():
+    track = CircularTrack(radius=6.0, track_width=2.0)
+    assert track.half_w == np.float64(6.0)
+    assert track.half_h == np.float64(6.0)
+
+
+def test_racing_env_with_circular_track_reset():
+    track = CircularTrack(radius=6.0, track_width=2.0)
+    env = RacingEnv(track=track)
+    obs = env.reset(seed=42)
+    assert env.state.x == np.float64(0.0)
+    assert env.state.y == np.float64(-6.0)
+    assert env.state.heading == np.float64(0.0)
+    assert isinstance(obs, np.ndarray)
+    assert obs.shape == (4,)
+
+
+def test_circular_track_progress_increases_when_moving_forward():
+    track = CircularTrack(radius=8.0, track_width=2.0)
+    env = RacingEnv(track=track, dt=0.1)
+    env.reset(seed=42)
+    p0 = env.current_progress
+    for _ in range(30):
+        env.step(np.array([0.5, 5.0]))
+    assert env.current_progress > p0

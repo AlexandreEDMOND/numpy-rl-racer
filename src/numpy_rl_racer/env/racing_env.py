@@ -14,6 +14,10 @@ class RectangularTrack:
     def goal_position(self):
         return (np.float64(0.0), -self.half_h)
 
+    @property
+    def start_position(self):
+        return (np.float64(0.0), -self.half_h, np.float64(0.0))
+
     def progress_along_centerline(self, x, y):
         px, py = np.float64(x), np.float64(y)
         hw, hh = self.half_w, self.half_h
@@ -56,9 +60,48 @@ class RectangularTrack:
         return False
 
 
+class CircularTrack:
+    def __init__(self, radius=6.0, track_width=2.0):
+        self.radius = np.float64(radius)
+        self.track_width = np.float64(track_width)
+        self._perimeter = np.float64(2.0 * np.pi * radius)
+
+    @property
+    def half_w(self):
+        return self.radius
+
+    @property
+    def half_h(self):
+        return self.radius
+
+    @property
+    def goal_position(self):
+        return (np.float64(0.0), -self.radius)
+
+    @property
+    def start_position(self):
+        return (np.float64(0.0), -self.radius, np.float64(0.0))
+
+    def progress_along_centerline(self, x, y):
+        px, py = np.float64(x), np.float64(y)
+        angle = np.arctan2(px, -py)
+        if angle < 0:
+            angle += 2.0 * np.pi
+        return angle / (2.0 * np.pi)
+
+    def is_on_track(self, x, y):
+        px, py = np.float64(x), np.float64(y)
+        dist = np.sqrt(px * px + py * py)
+        tw2 = self.track_width / 2.0
+        return (self.radius - tw2) <= dist <= (self.radius + tw2)
+
+
 class RacingEnv:
-    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1):
-        self.track = RectangularTrack(track_width, track_height, track_road_width)
+    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None):
+        if track is not None:
+            self.track = track
+        else:
+            self.track = RectangularTrack(track_width, track_height, track_road_width)
         self.car = KinematicCar()
         self.dt = np.float64(dt)
         self.state = None
@@ -73,7 +116,8 @@ class RacingEnv:
     def reset(self, seed=None):
         if seed is not None:
             np.random.seed(seed)
-        self.state = CarState(x=0.0, y=-self.track.half_h, heading=0.0, velocity=0.0)
+        sx, sy, sheading = self.track.start_position
+        self.state = CarState(x=sx, y=sy, heading=sheading, velocity=0.0)
         self.current_progress = np.float64(0.0)
         self.prev_progress = np.float64(0.0)
         self.lap_count = 0
