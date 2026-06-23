@@ -12,6 +12,12 @@ class MatplotlibRenderer:
         self._draw_background()
 
     def _draw_background(self):
+        if hasattr(self.track, 'radius'):
+            self._draw_circular_background()
+        else:
+            self._draw_rectangular_background()
+
+    def _draw_rectangular_background(self):
         hw = float(self.track.half_w)
         hh = float(self.track.half_h)
         tw = float(self.track.track_width)
@@ -42,6 +48,27 @@ class MatplotlibRenderer:
         margin = tw
         self.ax.set_xlim(-hw - margin, hw + margin)
         self.ax.set_ylim(-hh - margin, hh + margin)
+        self.ax.grid(True, alpha=0.3)
+        self.ax.set_title("numpy-rl-racer")
+
+    def _draw_circular_background(self):
+        R = float(self.track.radius)
+        tw = float(self.track.track_width)
+        tw2 = tw / 2.0
+
+        self.ax.add_patch(
+            mpatches.Circle((0, 0), R + tw2, facecolor="#dddddd", edgecolor="#888888", linewidth=1)
+        )
+        self.ax.add_patch(
+            mpatches.Circle((0, 0), R - tw2, facecolor=self.fig.get_facecolor(), edgecolor="#888888", linewidth=1)
+        )
+        self.ax.add_patch(
+            mpatches.Circle((0, 0), R, fill=False, linestyle="--", color="#aaaaaa", linewidth=0.5)
+        )
+
+        margin = tw
+        self.ax.set_xlim(-R - margin, R + margin)
+        self.ax.set_ylim(-R - margin, R + margin)
         self.ax.grid(True, alpha=0.3)
         self.ax.set_title("numpy-rl-racer")
 
