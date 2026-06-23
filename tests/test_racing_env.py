@@ -8,7 +8,7 @@ def test_reset_returns_numpy_observation():
     env = RacingEnv()
     obs = env.reset(seed=42)
     assert isinstance(obs, np.ndarray)
-    assert obs.shape == (4,)
+    assert obs.shape == (6,)
     assert obs.dtype == np.float64
 
 
@@ -17,7 +17,7 @@ def test_step_returns_observation_reward_done_info():
     env.reset(seed=42)
     obs, reward, done, info = env.step(np.array([0.0, 2.0]))
     assert isinstance(obs, np.ndarray)
-    assert obs.shape == (4,)
+    assert obs.shape == (6,)
     assert isinstance(reward, (float, np.floating))
     assert isinstance(done, (bool, np.bool_))
     assert isinstance(info, dict)
@@ -55,7 +55,7 @@ def test_respects_seed_determinism():
 def test_observation_contains_x_y_heading_velocity():
     env = RacingEnv()
     obs = env.reset(seed=42)
-    assert obs.shape == (4,)
+    assert obs.shape == (6,)
     assert not np.any(np.isnan(obs))
 
 
@@ -209,7 +209,7 @@ def test_racing_env_with_circular_track_reset():
     assert env.state.y == np.float64(-6.0)
     assert env.state.heading == np.float64(0.0)
     assert isinstance(obs, np.ndarray)
-    assert obs.shape == (4,)
+    assert obs.shape == (6,)
 
 
 def test_circular_track_progress_increases_when_moving_forward():
@@ -300,3 +300,70 @@ def test_goal_distance_shaping_magnitude_reasonable():
         f"Reward {reward} should not dominate existing components; "
         f"expected < 1.0 (lap bonus threshold)"
     )
+
+
+# ── Track-relative observation features ──────────────────────────────
+
+
+def test_observation_has_six_features():
+    env = RacingEnv()
+    obs = env.reset(seed=42)
+    assert len(obs) == 6
+
+
+def test_distance_to_edge_normalized_one_on_centerline_rectangular():
+    env = RacingEnv()
+    env.reset(seed=42)
+    env.state = CarState(x=2.0, y=-4.0, heading=0.0, velocity=0.0)
+    obs = env._get_observation()
+    np.testing.assert_almost_equal(obs[4], 1.0)
+
+
+def test_distance_to_edge_normalized_zero_at_boundary_rectangular():
+    env = RacingEnv()
+    env.reset(seed=42)
+    env.state = CarState(x=2.0, y=-5.0, heading=0.0, velocity=0.0)
+    obs = env._get_observation()
+    np.testing.assert_almost_equal(obs[4], 0.0)
+
+
+def test_heading_error_zero_when_aligned_with_centerline():
+    env = RacingEnv()
+    env.reset(seed=42)
+    env.state = CarState(x=2.0, y=-4.0, heading=0.0, velocity=0.0)
+    obs = env._get_observation()
+    np.testing.assert_almost_equal(obs[5], 0.0)
+
+
+def test_heading_error_positive_left_of_centerline():
+    env = RacingEnv()
+    env.reset(seed=42)
+    env.state = CarState(x=2.0, y=-4.0, heading=np.pi / 4, velocity=0.0)
+    obs = env._get_observation()
+    assert obs[5] > 0.0
+
+
+def test_heading_error_negative_right_of_centerline():
+    env = RacingEnv()
+    env.reset(seed=42)
+    env.state = CarState(x=2.0, y=-4.0, heading=-np.pi / 4, velocity=0.0)
+    obs = env._get_observation()
+    assert obs[5] < 0.0
+
+
+def test_distance_to_edge_normalized_one_on_centerline_circular():
+    track = CircularTrack(radius=6.0, track_width=2.0)
+    env = RacingEnv(track=track)
+    env.reset(seed=42)
+    env.state = CarState(x=0.0, y=-6.0, heading=0.0, velocity=0.0)
+    obs = env._get_observation()
+    np.testing.assert_almost_equal(obs[4], 1.0)
+
+
+def test_distance_to_edge_normalized_zero_at_boundary_circular():
+    track = CircularTrack(radius=6.0, track_width=2.0)
+    env = RacingEnv(track=track)
+    env.reset(seed=42)
+    env.state = CarState(x=0.0, y=-7.0, heading=0.0, velocity=0.0)
+    obs = env._get_observation()
+    np.testing.assert_almost_equal(obs[4], 0.0)

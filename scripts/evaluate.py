@@ -20,7 +20,7 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
 
     env = RacingEnv()
-    agent = DQNAgent(state_dim=4)
+    agent = DQNAgent(state_dim=6)
     agent.load(args.model_path)
     agent.epsilon = 0.0
 
