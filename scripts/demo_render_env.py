@@ -1,0 +1,33 @@
+from numpy_rl_racer.env import RacingEnv
+from numpy_rl_racer.rendering import MatplotlibRenderer
+
+
+def main():
+    env = RacingEnv()
+    env.reset(seed=0)
+    renderer = MatplotlibRenderer(env.track)
+
+    actions = [
+        [0.0, 3.0],
+        [0.3, 2.0],
+        [-0.2, 2.0],
+        [0.0, 1.0],
+        [0.5, 2.0],
+    ]
+
+    print("Running demo...")
+    for i, action in enumerate(actions):
+        obs, reward, done, _ = env.step(action)
+        renderer.render(env.state, step=i + 1, reward=reward)
+        print(f"  step={i + 1:2d}  x={env.state.x:6.2f}  y={env.state.y:6.2f}  "
+              f"heading={env.state.heading:5.2f}  reward={reward:5.2f}")
+        if done:
+            print(f"Episode finished at step {i + 1}")
+            break
+
+    print("Demo complete. Close the plot window to exit.")
+    renderer.show()
+
+
+if __name__ == "__main__":
+    main()
