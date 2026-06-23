@@ -27,3 +27,16 @@ Forbidden ML/RL dependencies:
 6. NumPy neural network
 7. DQN from scratch
 8. Training and evaluation scripts
+
+## Quickstart
+
+```bash
+# Install dependencies
+uv sync
+
+# Run tests
+uv run pytest
+
+# Lint with ruff
+uv run ruff check .
+```
