@@ -1,5 +1,7 @@
 import numpy as np
 
+from .utils import normalize_angle
+
 
 class CarState:
     def __init__(self, x=0.0, y=0.0, heading=0.0, velocity=0.0):
@@ -21,7 +23,7 @@ class KinematicCar:
 
     def step(self, state, steering, acceleration, dt=0.1):
         heading = state.heading + np.float64(steering) * np.float64(dt)
-        heading = _normalize_angle(heading)
+        heading = normalize_angle(heading)
 
         velocity = state.velocity + np.float64(acceleration) * np.float64(dt)
         velocity = np.clip(velocity, 0.0, self.max_speed)
@@ -30,7 +32,3 @@ class KinematicCar:
         y = state.y + velocity * np.sin(heading) * np.float64(dt)
 
         return CarState(x, y, heading, velocity)
-
-
-def _normalize_angle(angle):
-    return np.arctan2(np.sin(angle), np.cos(angle))
