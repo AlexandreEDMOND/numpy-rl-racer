@@ -42,7 +42,8 @@ class ReplayBuffer:
 class DQNAgent:
     def __init__(self, state_dim, hidden_sizes=None, lr=1e-3, gamma=0.99,
                  epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995,
-                 buffer_size=10000, batch_size=64, target_update_freq=100):
+                 buffer_size=10000, batch_size=64, target_update_freq=100,
+                 use_double_dqn=True):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
         self.online_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
@@ -56,6 +57,7 @@ class DQNAgent:
         self.epsilon_decay = epsilon_decay
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
+        self.use_double_dqn = use_double_dqn
         self._step_counter = 0
 
     def save(self, path):
@@ -93,8 +95,13 @@ class DQNAgent:
 
         states, actions, rewards, next_states, dones = self.replay_buffer.sample(self.batch_size)
 
-        next_q = self.target_net.forward(next_states)
-        max_next_q = np.max(next_q, axis=1)
+        next_q_target = self.target_net.forward(next_states)
+        if self.use_double_dqn:
+            next_q_online = self.online_net.forward(next_states)
+            best_actions = np.argmax(next_q_online, axis=1)
+            max_next_q = next_q_target[np.arange(self.batch_size), best_actions]
+        else:
+            max_next_q = np.max(next_q_target, axis=1)
         target_q = rewards + self.gamma * max_next_q * (1.0 - dones)
 
         current_q = self.online_net.forward(states)

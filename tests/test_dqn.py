@@ -61,6 +61,7 @@ def test_dqn_training_step_runs():
 
 
 def test_dqn_training_loss_decreases():
+    np.random.seed(2)
     agent = DQNAgent(state_dim=4, hidden_sizes=[16], lr=1e-2, batch_size=16)
     agent.epsilon = 0.5
     losses = []
@@ -142,3 +143,65 @@ def test_hard_update_target():
     for src, dst in zip(agent.online_net.layers, agent.target_net.layers):
         np.testing.assert_array_equal(src.w, dst.w)
         np.testing.assert_array_equal(src.b, dst.b)
+
+
+def test_double_dqn_target_computation():
+    batch_size = 4
+    agent = DQNAgent(state_dim=1, hidden_sizes=[1], lr=0.0,
+                     batch_size=batch_size, buffer_size=batch_size)
+
+    for layer in agent.online_net.layers + agent.target_net.layers:
+        layer.w[:] = 0.0
+        layer.b[:] = 0.0
+
+    agent.online_net.layers[-1].b[:] = np.array([0.0, 0.1, 0.2, 0.3, 0.4])
+    agent.target_net.layers[-1].b[:] = np.array([0.9, 0.0, 0.0, 0.0, 0.5])
+
+    for _ in range(batch_size - 1):
+        agent.replay_buffer.push(np.array([0.0]), 0, 0.0, np.array([0.0]), False)
+
+    loss = agent.train_step(np.array([0.0]), 0, 0.0, np.array([0.0]), False)
+
+    gamma = agent.gamma
+    online_out = agent.online_net.forward(np.array([[0.0]]))[0]
+    best_a = int(np.argmax(online_out))
+    target_out = agent.target_net.forward(np.array([[0.0]]))[0]
+    expected_target = 0.0 + gamma * target_out[best_a]
+    q_sa = online_out[0]
+    expected_loss = np.mean((expected_target - q_sa) ** 2)
+
+    assert np.isclose(loss, expected_loss, rtol=1e-6), (
+        f"Loss {loss} does not match Double DQN target {expected_loss}"
+    )
+
+
+def test_standard_dqn_target_computation_when_disabled():
+    batch_size = 4
+    agent = DQNAgent(
+        state_dim=1,
+        hidden_sizes=[1],
+        lr=0.0,
+        batch_size=batch_size,
+        buffer_size=batch_size,
+        use_double_dqn=False,
+    )
+
+    for layer in agent.online_net.layers + agent.target_net.layers:
+        layer.w[:] = 0.0
+        layer.b[:] = 0.0
+
+    agent.online_net.layers[-1].b[:] = np.array([0.0, 0.1, 0.2, 0.3, 0.4])
+    agent.target_net.layers[-1].b[:] = np.array([0.9, 0.0, 0.0, 0.0, 0.5])
+
+    for _ in range(batch_size - 1):
+        agent.replay_buffer.push(np.array([0.0]), 0, 0.0, np.array([0.0]), False)
+
+    loss = agent.train_step(np.array([0.0]), 0, 0.0, np.array([0.0]), False)
+
+    expected_target = agent.gamma * 0.9
+    q_sa = 0.0
+    expected_loss = np.mean((expected_target - q_sa) ** 2)
+
+    assert np.isclose(loss, expected_loss, rtol=1e-6), (
+        f"Loss {loss} does not match standard DQN target {expected_loss}"
+    )

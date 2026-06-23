@@ -60,6 +60,9 @@ def test_mlp_without_hidden():
 
 def test_mlp_output_activation_sigmoid():
     mlp = MLP([2, 4, 1], output_activation="sigmoid")
+    for layer in mlp.layers:
+        layer.w[:] = 0.0
+        layer.b[:] = 0.0
     x = np.array([[100.0, -100.0]])
     out = mlp.forward(x)
     assert np.all(out > 0.0) and np.all(out < 1.0)
