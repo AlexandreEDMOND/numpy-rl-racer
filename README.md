@@ -32,11 +32,12 @@ Forbidden ML/RL dependencies:
 5. **Visualization** — `MatplotlibRenderer`: top‑down plot of the track with the car
    position and heading arrow, step counter and reward overlay.
 
-### 📋 À faire (reste à faire)
+### ✅ Done
 
 6. **NumPy neural network** — Implement a feed‑forward network (Dense layers, ReLU,
-   optional output activation) using only `numpy`, supporting forward‑pass and
-   trainable parameter storage.
+   optional output activation) using only `numpy`, supporting forward‑pass,
+   backward‑pass, and SGD optimisation.
+
 7. **DQN from scratch** — Implement the Deep Q‑Network algorithm:
    - Experience replay buffer.
    - Epsilon‑greedy action selection.
@@ -44,6 +45,8 @@ Forbidden ML/RL dependencies:
    - Q‑learning loss (MSE between target and online Q‑values).
    - Training loop (gradient descent via NumPy-only backpropagation or a simple
      optimiser like SGD).
+
+### 📋 À faire (reste à faire)
 8. **Training and evaluation scripts** — One or more scripts that:
    - Train the DQN agent in the `RacingEnv`.
    - Log episode rewards and losses.
