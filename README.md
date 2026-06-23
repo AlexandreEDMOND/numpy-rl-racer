@@ -31,27 +31,39 @@ Forbidden ML/RL dependencies:
    `(obs, reward, done, info)`; episode ends when the car leaves the track.
 5. **Visualization** — `MatplotlibRenderer`: top‑down plot of the track with the car
    position and heading arrow, step counter and reward overlay.
-
-### ✅ Done
-
-6. **NumPy neural network** — Implement a feed‑forward network (Dense layers, ReLU,
+6. **NumPy neural network** — Feed‑forward network (Dense layers, ReLU,
    optional output activation) using only `numpy`, supporting forward‑pass,
    backward‑pass, and SGD optimisation.
+7. **DQN from scratch** — Deep Q‑Network algorithm with experience replay,
+   epsilon‑greedy action selection, target network, and Q‑learning loss —
+   all implemented with NumPy-only gradient descent.
+8. **Training and evaluation scripts** — `scripts/train.py` trains the DQN agent,
+   logs episode rewards and losses, saves model parameters, and plots
+   training curves. `scripts/evaluate.py` loads a trained model, renders
+   evaluation rollouts, and saves screenshots.
 
-7. **DQN from scratch** — Implement the Deep Q‑Network algorithm:
-   - Experience replay buffer.
-   - Epsilon‑greedy action selection.
-   - Target network with periodic hard copy.
-   - Q‑learning loss (MSE between target and online Q‑values).
-   - Training loop (gradient descent via NumPy-only backpropagation or a simple
-     optimiser like SGD).
+## Training Results
 
-### 📋 À faire (reste à faire)
-8. **Training and evaluation scripts** — One or more scripts that:
-   - Train the DQN agent in the `RacingEnv`.
-   - Log episode rewards and losses.
-   - Evaluate a trained policy (render a few rollouts).
-   - Save / reload learned parameters.
+The DQN agent was trained for 300 episodes on the default rectangular track. The
+training curve below shows the episode reward and average loss.
+
+![Training curve](images/training_curve.png)
+
+After training, the greedy policy was evaluated for 3 episodes. Below are the
+final frames of each evaluation rollout.
+
+| Episode 1 | Episode 2 | Episode 3 |
+|:---------:|:---------:|:---------:|
+| ![eval 1](images/eval_ep1_final.png) | ![eval 2](images/eval_ep2_final.png) | ![eval 3](images/eval_ep3_final.png) |
+
+**Usage:**
+```bash
+# Train the DQN agent
+uv run python scripts/train.py --episodes 300
+
+# Evaluate a trained policy
+uv run python scripts/evaluate.py --model-path models/best_model.npz
+```
 
 ## Quickstart
 

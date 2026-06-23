@@ -58,6 +58,23 @@ class DQNAgent:
         self.target_update_freq = target_update_freq
         self._step_counter = 0
 
+    def save(self, path):
+        params = {}
+        for i, layer in enumerate(self.online_net.layers):
+            params[f"layer_{i}_w"] = layer.w
+            params[f"layer_{i}_b"] = layer.b
+        np.savez(path, **params)
+
+    def load(self, path):
+        data = np.load(path)
+        for i, layer in enumerate(self.online_net.layers):
+            key_w = f"layer_{i}_w"
+            key_b = f"layer_{i}_b"
+            if key_w in data and key_b in data:
+                layer.w[:] = data[key_w]
+                layer.b[:] = data[key_b]
+        self._hard_update_target()
+
     def _hard_update_target(self):
         for src, dst in zip(self.online_net.layers, self.target_net.layers):
             dst.w[:] = src.w
