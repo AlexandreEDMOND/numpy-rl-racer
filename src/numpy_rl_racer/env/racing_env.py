@@ -125,7 +125,10 @@ class RacingEnv:
 
     def step(self, action):
         steering, acceleration = np.float64(action[0]), np.float64(action[1])
+        gx, gy = self.goal_position
+        prev_dist = np.sqrt((self.state.x - gx) ** 2 + (self.state.y - gy) ** 2)
         self.state = self.car.step(self.state, steering, acceleration, self.dt)
+        new_dist = np.sqrt((self.state.x - gx) ** 2 + (self.state.y - gy) ** 2)
         on_track = self.track.is_on_track(self.state.x, self.state.y)
         done = not on_track
 
@@ -133,6 +136,7 @@ class RacingEnv:
         self.current_progress = self.track.progress_along_centerline(self.state.x, self.state.y)
 
         reward = np.float64(0.1 if on_track else -1.0)
+        reward += np.float64(0.5) * (prev_dist - new_dist) / self.track.track_width
 
         if self.current_progress < self.prev_progress - np.float64(0.5):
             self.lap_count += 1
