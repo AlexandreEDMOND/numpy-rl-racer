@@ -56,3 +56,46 @@ def test_observation_contains_x_y_heading_velocity():
     obs = env.reset(seed=42)
     assert obs.shape == (4,)
     assert not np.any(np.isnan(obs))
+
+
+def test_progress_reward_increases_with_forward_movement():
+    env = RacingEnv()
+    env.reset(seed=42)
+    obs, reward, done, info = env.step(np.array([0.0, 2.0]))
+    assert reward > 0.1, "Progress reward should increase total above base survival"
+    assert not done
+
+
+def test_progress_info_in_info_dict():
+    env = RacingEnv()
+    env.reset(seed=42)
+    obs, reward, done, info = env.step(np.array([0.0, 2.0]))
+    assert "progress" in info
+    assert isinstance(info["progress"], float)
+    assert 0.0 <= info["progress"] <= 1.0
+
+
+def test_goal_reward_on_lap_completion():
+    env = RacingEnv()
+    env.reset(seed=42)
+    hw, hh = env.track.half_w, env.track.half_h
+    # Position the car near the start of the bottom edge (just past the corner)
+    env.state.x = np.float64(-hw + 0.2)
+    env.state.y = np.float64(-hh + 0.2)
+    # Simulate near-completion of a lap to trigger the wrap detection
+    env._prev_progress = np.float64(0.99)
+    env._prev_seg_idx = 3
+    env._cumulative_progress = np.float64(0.99)
+    obs, reward, done, info = env.step(np.array([0.0, 2.0]))
+    assert reward > 10.0, f"Expected goal_reward (10.0) in reward, got {reward}"
+    assert "progress" in info
+
+
+def test_progress_resets_on_new_episode():
+    env = RacingEnv()
+    env.reset(seed=42)
+    env.step(np.array([0.0, 2.0]))
+    env.reset(seed=99)
+    obs, reward, done, info = env.step(np.array([0.0, 2.0]))
+    assert "progress" in info
+    assert 0.0 <= info["progress"] <= 1.0
