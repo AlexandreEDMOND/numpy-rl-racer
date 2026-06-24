@@ -55,10 +55,11 @@ N_ACTIONS = len(ACTIONS)
 
 
 class ReplayBuffer:
-    def __init__(self, capacity=10000):
+    def __init__(self, capacity=10000, rng=None):
         self.capacity = capacity
         self.buffer = []
         self.pos = 0
+        self.rng = rng
 
     def push(self, state, action, reward, next_state, done):
         if len(self.buffer) < self.capacity:
@@ -67,7 +68,8 @@ class ReplayBuffer:
         self.pos = (self.pos + 1) % self.capacity
 
     def sample(self, batch_size):
-        indices = np.random.choice(len(self.buffer), batch_size, replace=False)
+        _rng = self.rng if self.rng is not None else np.random
+        indices = _rng.choice(len(self.buffer), batch_size, replace=False)
         batch = [self.buffer[i] for i in indices]
         states = np.array([t[0] for t in batch])
         actions = np.array([t[1] for t in batch])
@@ -81,7 +83,7 @@ class ReplayBuffer:
 
 
 class PrioritizedReplayBuffer:
-    def __init__(self, capacity=10000, alpha=0.6, beta0=0.4, beta_anneal_steps=100000):
+    def __init__(self, capacity=10000, alpha=0.6, beta0=0.4, beta_anneal_steps=100000, rng=None):
         self.tree = SumTree(capacity)
         self.alpha = alpha
         self.beta0 = beta0
@@ -89,6 +91,7 @@ class PrioritizedReplayBuffer:
         self.beta_anneal_steps = beta_anneal_steps
         self.max_priority = 1.0
         self._step = 0
+        self.rng = rng
 
     def push(self, state, action, reward, next_state, done):
         self.tree.add(self.max_priority, (state, action, reward, next_state, done))
@@ -103,10 +106,11 @@ class PrioritizedReplayBuffer:
         total = self.tree.total()
         segment = total / batch_size
 
+        _rng = self.rng if self.rng is not None else np.random
         for i in range(batch_size):
             a = segment * i
             b = segment * (i + 1)
-            s = np.random.uniform(a, b)
+            s = _rng.uniform(a, b)
             idx, priority, data = self.tree.get(s)
             indices[i] = idx
             priorities[i] = priority
@@ -139,9 +143,10 @@ class DQNAgent:
                  epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995,
                  buffer_size=10000, batch_size=64, target_update_freq=100,
                  use_double_dqn=True, use_per=False, alpha=0.6, beta0=0.4,
-                 beta_anneal_steps=100000, tau=0.0):
+                 beta_anneal_steps=100000, tau=0.0, seed=None):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
+        self.rng = np.random.RandomState(seed) if seed is not None else None
         self.online_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
         self.target_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
         self._hard_update_target()
@@ -149,9 +154,10 @@ class DQNAgent:
         self.use_per = use_per
         if use_per:
             self.replay_buffer = PrioritizedReplayBuffer(buffer_size, alpha=alpha, beta0=beta0,
-                                                         beta_anneal_steps=beta_anneal_steps)
+                                                         beta_anneal_steps=beta_anneal_steps,
+                                                         rng=self.rng)
         else:
-            self.replay_buffer = ReplayBuffer(buffer_size)
+            self.replay_buffer = ReplayBuffer(buffer_size, rng=self.rng)
         self.gamma = gamma
         self.epsilon = epsilon
         self.epsilon_min = epsilon_min
@@ -191,8 +197,9 @@ class DQNAgent:
             dst.b[:] = tau * src.b + (1.0 - tau) * dst.b
 
     def act(self, state, training=True):
-        if training and np.random.random() < self.epsilon:
-            return np.random.randint(N_ACTIONS)
+        _rng = self.rng if self.rng is not None else np.random
+        if training and _rng.random() < self.epsilon:
+            return _rng.randint(N_ACTIONS)
         q_values = self.online_net.forward(state.reshape(1, -1)).flatten()
         return int(np.argmax(q_values))
 

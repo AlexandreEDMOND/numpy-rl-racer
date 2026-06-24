@@ -61,7 +61,7 @@ def main():
         env = RacingEnv()
 
     print(f"Track type: {args.track}")
-    agent = DQNAgent(state_dim=6)
+    agent = DQNAgent(state_dim=6, seed=args.seed)
 
     logger = None
     if args.log_dir:
