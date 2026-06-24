@@ -1,6 +1,6 @@
 import numpy as np
 
-from numpy_rl_racer.network import MLP, SGD
+from numpy_rl_racer.network import DuelingMLP, MLP, SGD
 
 
 class SumTree:
@@ -143,12 +143,17 @@ class DQNAgent:
                  epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995,
                  buffer_size=10000, batch_size=64, target_update_freq=100,
                  use_double_dqn=True, use_per=False, alpha=0.6, beta0=0.4,
-                 beta_anneal_steps=100000, tau=0.0, seed=None):
+                 beta_anneal_steps=100000, tau=0.0, seed=None,
+                 use_dueling_dqn=False):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
         self.rng = np.random.RandomState(seed) if seed is not None else None
-        self.online_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
-        self.target_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
+        if use_dueling_dqn:
+            self.online_net = DuelingMLP(state_dim, hidden_sizes, N_ACTIONS)
+            self.target_net = DuelingMLP(state_dim, hidden_sizes, N_ACTIONS)
+        else:
+            self.online_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
+            self.target_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
         self._hard_update_target()
         self.optimizer = SGD(self.online_net, lr=lr)
         self.use_per = use_per
