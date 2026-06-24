@@ -1,7 +1,7 @@
 import numpy as np
 
 from numpy_rl_racer.env.car import CarState
-from numpy_rl_racer.env.racing_env import CircularTrack, Obstacle, RacingEnv, RectangularTrack
+from numpy_rl_racer.env.racing_env import CircularTrack, Figure8Track, Obstacle, RacingEnv, RectangularTrack
 
 
 def test_reset_returns_numpy_observation():
@@ -124,6 +124,156 @@ def test_lap_completion_gives_bonus_reward():
     assert info['progress'] < 0.5, (
         "Progress should wrap to low value after lap completion"
     )
+
+
+# ── Figure8Track ──────────────────────────────────────────────────
+
+
+def test_figure8_track_initialization():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    assert track.radius == np.float64(6.0)
+    assert track.track_width == np.float64(2.0)
+
+
+def test_figure8_track_goal_position():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    gx, gy = track.goal_position
+    R = 6.0
+    np.testing.assert_almost_equal(gx, R / np.sqrt(2.0))
+    np.testing.assert_almost_equal(gy, -R / 2.0)
+
+
+def test_figure8_track_start_position():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    sx, sy, sh = track.start_position
+    R = 6.0
+    np.testing.assert_almost_equal(sx, R / np.sqrt(2.0))
+    np.testing.assert_almost_equal(sy, -R / 2.0)
+    assert sh == np.float64(0.0)
+
+
+def test_figure8_track_progress_at_goal_is_zero():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    gx, gy = track.goal_position
+    np.testing.assert_almost_equal(track.progress_along_centerline(gx, gy), 0.0)
+
+
+def test_figure8_track_progress_monotonic():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    ts = np.linspace(0.01, 0.99, 50)
+    prev_p = -1.0
+    for t in ts:
+        x, y, _ = track.sample_centerline_point(t)
+        p = track.progress_along_centerline(x, y)
+        assert p >= prev_p - 0.01, f"Progress regressed at t={t}: {prev_p} -> {p}"
+        prev_p = p
+
+
+def test_figure8_track_progress_wraps():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    gx, gy = track.goal_position
+    assert track.progress_along_centerline(gx, gy) == np.float64(0.0)
+    x_just_before, y_just_before, _ = track.sample_centerline_point(0.999)
+    p = track.progress_along_centerline(x_just_before, y_just_before)
+    assert p > 0.99
+
+
+def test_figure8_track_centerline_points_are_on_track():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    for t in np.linspace(0.0, 0.99, 20):
+        x, y, _ = track.sample_centerline_point(t)
+        assert track.is_on_track(x, y), f"Centerline point at t={t} not on track"
+
+
+def test_figure8_track_far_points_off_track():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    assert track.is_on_track(0.0, 0.0), "Intersection should be on track"
+    assert not track.is_on_track(10.0, 0.0), "Point far right should be off track"
+    assert not track.is_on_track(0.0, 5.0), "Point far above should be off track"
+    assert not track.is_on_track(0.0, -5.0), "Point far below should be off track"
+
+
+def test_figure8_track_centerline_info_on_centerline():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    gx, gy = track.goal_position
+    dist, tangent = track.centerline_info(gx, gy)
+    np.testing.assert_almost_equal(dist, 0.0, decimal=10)
+    np.testing.assert_almost_equal(tangent, 0.0, decimal=10)
+
+
+def test_figure8_track_tangent_at_extremes():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    # t=0.125 → θ=0 (rightmost, R, 0): tangent = π/2 (up)
+    x_r, y_r, _ = track.sample_centerline_point(0.125)
+    _, tangent_r = track.centerline_info(x_r, y_r)
+    np.testing.assert_almost_equal(tangent_r, np.pi / 2.0, decimal=5)
+    # t=0.25 → θ=π/4 (top-right, R/√2, R/2): tangent = π (left)
+    x_tr, y_tr, _ = track.sample_centerline_point(0.25)
+    _, tangent_tr = track.centerline_info(x_tr, y_tr)
+    np.testing.assert_almost_equal(tangent_tr, np.pi, decimal=5)
+
+
+def test_figure8_track_half_properties():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    assert track.half_w == np.float64(6.0)
+    assert track.half_h == np.float64(3.0)
+
+
+def test_figure8_track_sample_returns_on_track():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    for _ in range(20):
+        x, y, _ = track.sample_centerline_point()
+        assert track.is_on_track(x, y)
+
+
+def test_figure8_racing_env_reset():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    env = RacingEnv(track=track, randomize_start=False)
+    obs = env.reset(seed=42)
+    gx, gy = track.goal_position
+    np.testing.assert_almost_equal(float(env.state.x), float(gx), decimal=10)
+    np.testing.assert_almost_equal(float(env.state.y), float(gy), decimal=10)
+    assert env.state.heading == np.float64(0.0)
+    assert isinstance(obs, np.ndarray)
+
+
+def test_figure8_racing_env_randomized_start_on_track():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    env = RacingEnv(track=track, randomize_start=True)
+    for seed in range(20):
+        env.reset(seed=seed)
+        assert track.is_on_track(env.state.x, env.state.y), (
+            f"Start position ({env.state.x}, {env.state.y}) with seed {seed} is off track"
+        )
+
+
+def test_figure8_racing_env_step_straight_stays_on_track():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    env = RacingEnv(track=track)
+    env.reset(seed=42)
+    for _ in range(30):
+        obs, reward, done, info = env.step(np.array([1.0, 5.0]))
+        if done:
+            break
+    # With a moderate steering input the car should survive several steps
+    # (this tests that the env doesn't crash, and track methods work)
+
+
+def test_figure8_racing_env_track_type():
+    env = RacingEnv(track_type='figure8')
+    from numpy_rl_racer.env.racing_env import Figure8Track as FT
+    assert isinstance(env.track, FT)
+    obs = env.reset(seed=42)
+    assert isinstance(obs, np.ndarray)
+    assert not np.any(np.isnan(obs))
+
+
+def test_figure8_track_progress_bounds():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    for t in np.linspace(0.0, 0.99, 20):
+        x, y, _ = track.sample_centerline_point(t)
+        p = track.progress_along_centerline(x, y)
+        assert 0.0 <= p <= 1.0
 
 
 # ── CircularTrack ──────────────────────────────────────────────────

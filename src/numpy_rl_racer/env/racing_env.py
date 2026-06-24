@@ -167,10 +167,88 @@ class CircularTrack:
         return dist_to_centerline, angle
 
 
+class Figure8Track:
+    def __init__(self, radius=6.0, track_width=2.0):
+        self.radius = np.float64(radius)
+        self.track_width = np.float64(track_width)
+        self._n = 2000
+        self._theta_offset = 7.0 * np.pi / 4.0
+        self._precompute()
+
+    def _precompute(self):
+        n = self._n
+        self._t_vals = np.linspace(0.0, 1.0, n, endpoint=False)
+        thetas = 2.0 * np.pi * self._t_vals + self._theta_offset
+        ct = np.cos(thetas)
+        st = np.sin(thetas)
+        self._cs_x = self.radius * ct
+        self._cs_y = self.radius * st * ct
+        self._cs_tangents = np.arctan2(np.cos(2.0 * thetas), -np.sin(thetas))
+
+    @property
+    def goal_position(self):
+        theta = self._theta_offset
+        x = self.radius * np.cos(theta)
+        y = self.radius * np.sin(theta) * np.cos(theta)
+        return (np.float64(x), np.float64(y))
+
+    @property
+    def start_position(self):
+        gx, gy = self.goal_position
+        return (gx, gy, np.float64(0.0))
+
+    @property
+    def half_w(self):
+        return self.radius
+
+    @property
+    def half_h(self):
+        return self.radius * np.float64(0.5)
+
+    def sample_centerline_point(self, t=None):
+        if t is None:
+            t = np.random.uniform(0.0, 1.0)
+        theta = 2.0 * np.pi * t + self._theta_offset
+        x = self.radius * np.cos(theta)
+        y = self.radius * np.sin(theta) * np.cos(theta)
+        tangent = np.arctan2(np.cos(2.0 * theta), -np.sin(theta))
+        return (np.float64(x), np.float64(y), np.float64(tangent))
+
+    def progress_along_centerline(self, x, y):
+        px, py = np.float64(x), np.float64(y)
+        dx = self._cs_x - px
+        dy = self._cs_y - py
+        dist_sq = dx * dx + dy * dy
+        best_idx = np.argmin(dist_sq)
+        return self._t_vals[best_idx]
+
+    def is_on_track(self, x, y):
+        px, py = np.float64(x), np.float64(y)
+        dx = self._cs_x - px
+        dy = self._cs_y - py
+        dist_sq = dx * dx + dy * dy
+        min_dist = np.sqrt(np.min(dist_sq))
+        tw2 = self.track_width / np.float64(2.0)
+        return min_dist <= tw2
+
+    def centerline_info(self, x, y):
+        px, py = np.float64(x), np.float64(y)
+        dx = self._cs_x - px
+        dy = self._cs_y - py
+        dist_sq = dx * dx + dy * dy
+        best_idx = np.argmin(dist_sq)
+        dist = np.sqrt(dist_sq[best_idx])
+        tangent = self._cs_tangents[best_idx]
+        return (dist, tangent)
+
+
 class RacingEnv:
-    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None, randomize_start=True, obstacles=None, time_penalty=0.0):
+    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None, track_type='rectangular', randomize_start=True, obstacles=None, time_penalty=0.0):
         if track is not None:
             self.track = track
+        elif track_type == 'figure8':
+            radius = min(track_width, track_height) / 2.0
+            self.track = Figure8Track(radius, track_road_width)
         else:
             self.track = RectangularTrack(track_width, track_height, track_road_width)
         self.randomize_start = randomize_start
