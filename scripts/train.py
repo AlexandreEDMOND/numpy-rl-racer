@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 
 import numpy as np
@@ -6,6 +7,19 @@ import numpy as np
 from numpy_rl_racer.agent import DQNAgent, ACTIONS
 from numpy_rl_racer.env import CircularTrack, RacingEnv
 from numpy_rl_racer.utils.scheduler import ExponentialDecay, StepDecay
+
+
+def _load_config(config_path):
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+    with open(config_path) as f:
+        try:
+            config = json.load(f)
+        except json.JSONDecodeError:
+            raise
+    if not isinstance(config, dict):
+        raise ValueError(f"Config file must contain a JSON object, got {type(config).__name__}")
+    return config
 
 
 def plot_training(episode_rewards, episode_losses, save_dir,
@@ -52,6 +66,8 @@ def plot_training(episode_rewards, episode_losses, save_dir,
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Train a DQN agent in the RacingEnv.")
+    parser.add_argument("--config", "-c", default=None,
+                        help="Path to JSON config file for hyperparameters")
     parser.add_argument("--episodes", type=int, default=500, help="Number of training episodes")
     parser.add_argument("--max-steps", type=int, default=200, help="Max steps per episode")
     parser.add_argument("--save-dir", default="models", help="Directory to save model parameters")
@@ -90,9 +106,21 @@ def main(argv=None):
                         help="Run evaluation every N training episodes (0 = disabled)")
     parser.add_argument("--eval-episodes", type=int, default=5,
                         help="Number of evaluation episodes per eval run")
+
+    known_args, _ = parser.parse_known_args(argv)
+    if known_args.config:
+        config = _load_config(known_args.config)
+        parser.set_defaults(**config)
+
     args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
+
+    resolved = {k: v for k, v in vars(args).items() if k != "config"}
+    config_out = os.path.join(args.save_dir, "config.json")
+    with open(config_out, "w") as f:
+        json.dump(resolved, f, indent=2)
+    print(f"Saved configuration to {config_out}")
 
     if args.track == "circular":
         track = CircularTrack(radius=6.0, track_width=2.0)
