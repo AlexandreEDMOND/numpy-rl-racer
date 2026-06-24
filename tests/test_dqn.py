@@ -1,7 +1,7 @@
 import numpy as np
 
 from numpy_rl_racer.agent.dqn import DQNAgent, PrioritizedReplayBuffer, ReplayBuffer, SumTree, N_ACTIONS
-from numpy_rl_racer.network import Dense, MLP, SGD
+from numpy_rl_racer.network import Dense, MLP, NoisyLinear, SGD
 
 
 def test_replay_buffer_push_and_len():
@@ -724,6 +724,85 @@ def test_n_step_training_step_runs():
         done = False
         loss = agent.train_step(state, action, reward, next_state, done)
         assert np.isfinite(loss) if loss > 0 else True
+
+
+# -- NoisyNet tests ---------------------------------------------------------
+
+
+def test_dqn_noisy_net_act():
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, use_noisy=True)
+    assert agent.epsilon == 0.0
+    for layer in agent.online_net.layers:
+        if isinstance(layer, NoisyLinear):
+            assert hasattr(layer, "sigma_w")
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    action = agent.act(state, training=True)
+    assert 0 <= action < N_ACTIONS
+
+
+def test_dqn_noisy_net_act_greedy():
+    """Noisy DQN should act greedily (no epsilon exploration)."""
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, use_noisy=True, seed=42)
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, use_noisy=True, seed=42)
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    actions1 = [agent.act(state, training=True) for _ in range(10)]
+    actions2 = [agent2.act(state, training=True) for _ in range(10)]
+    assert actions1 == actions2
+
+
+def test_dqn_noisy_net_training():
+    np.random.seed(2)
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-2, batch_size=16,
+                     use_noisy=True)
+    losses = []
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for _ in range(150):
+        action = agent.act(state, training=True)
+        next_state = state + np.random.randn(6) * 0.01
+        reward = 0.1
+        done = False
+        loss = agent.train_step(state, action, reward, next_state, done)
+        if loss > 0:
+            losses.append(loss)
+    if len(losses) >= 40:
+        assert np.mean(losses[-20:]) < np.mean(losses[:20])
+
+
+def test_dqn_noisy_net_training_with_dueling():
+    np.random.seed(2)
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-2, batch_size=16,
+                     use_noisy=True, use_dueling_dqn=True)
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for _ in range(30):
+        action = agent.act(state, training=True)
+        next_state = state + np.random.randn(6) * 0.01
+        reward = 0.1
+        done = False
+        loss = agent.train_step(state, action, reward, next_state, done)
+        assert np.isfinite(loss) if loss > 0 else True
+
+
+def test_dqn_noisy_net_save_load(tmp_path):
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, use_noisy=True)
+    for layer in agent.online_net.layers:
+        if isinstance(layer, NoisyLinear):
+            layer.w[:] = 1.0
+            layer.b[:] = 2.0
+            layer.sigma_w[:] = 0.1
+            layer.sigma_b[:] = 0.2
+
+    path = str(tmp_path / "noisy_model.npz")
+    agent.save(path)
+
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, use_noisy=True)
+    agent2.load(path)
+
+    for l1, l2 in zip(agent.online_net.layers, agent2.online_net.layers):
+        np.testing.assert_array_equal(l1.w, l2.w)
+        np.testing.assert_array_equal(l1.b, l2.b)
+        if isinstance(l1, NoisyLinear):
+            np.testing.assert_array_equal(l1.sigma_w, l2.sigma_w)
+            np.testing.assert_array_equal(l1.sigma_b, l2.sigma_b)
 
 
 def test_n_step_training_loss_decreases():
