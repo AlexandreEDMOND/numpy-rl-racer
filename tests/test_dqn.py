@@ -516,3 +516,55 @@ def test_save_load_round_trip_soft_update(tmp_path):
     for l1, l2 in zip(agent2.online_net.layers, agent2.target_net.layers):
         np.testing.assert_array_equal(l1.w, l2.w)
         np.testing.assert_array_equal(l1.b, l2.b)
+
+
+# -- Seeded reproducibility tests -------------------------------------------
+
+
+def test_agent_seed_reproducibility():
+    agent1 = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, seed=42)
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, seed=42)
+    agent1.epsilon = 1.0
+    agent2.epsilon = 1.0
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    actions1 = [agent1.act(state, training=True) for _ in range(100)]
+    actions2 = [agent2.act(state, training=True) for _ in range(100)]
+    assert actions1 == actions2
+
+
+def test_replay_buffer_seed_reproducibility():
+    buf1 = ReplayBuffer(capacity=10, rng=np.random.RandomState(42))
+    buf2 = ReplayBuffer(capacity=10, rng=np.random.RandomState(42))
+    for i in range(10):
+        buf1.push(np.array([float(i)]), i, float(i), np.array([float(i + 1)]), False)
+        buf2.push(np.array([float(i)]), i, float(i), np.array([float(i + 1)]), False)
+    s1, a1, r1, ns1, d1 = buf1.sample(4)
+    s2, a2, r2, ns2, d2 = buf2.sample(4)
+    np.testing.assert_array_equal(s1, s2)
+    np.testing.assert_array_equal(a1, a2)
+    np.testing.assert_array_equal(r1, r2)
+    np.testing.assert_array_equal(ns1, ns2)
+    np.testing.assert_array_equal(d1, d2)
+
+
+def test_prioritized_replay_buffer_seed_reproducibility():
+    buf1 = PrioritizedReplayBuffer(capacity=10, rng=np.random.RandomState(42))
+    buf2 = PrioritizedReplayBuffer(capacity=10, rng=np.random.RandomState(42))
+    for i in range(10):
+        buf1.push(np.array([float(i)]), i, float(i), np.array([float(i + 1)]), False)
+        buf2.push(np.array([float(i)]), i, float(i), np.array([float(i + 1)]), False)
+    res1 = buf1.sample(4)
+    res2 = buf2.sample(4)
+    for arr1, arr2 in zip(res1, res2):
+        np.testing.assert_array_equal(arr1, arr2)
+
+
+def test_agent_seed_none_stochastic():
+    agent1 = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, seed=None)
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, seed=None)
+    agent1.epsilon = 1.0
+    agent2.epsilon = 1.0
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    actions1 = [agent1.act(state, training=True) for _ in range(100)]
+    actions2 = [agent2.act(state, training=True) for _ in range(100)]
+    assert actions1 != actions2
