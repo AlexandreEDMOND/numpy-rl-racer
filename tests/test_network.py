@@ -293,3 +293,75 @@ class TestLRSchedulerBase:
             assert False, "Expected NotImplementedError"
         except NotImplementedError:
             pass
+
+
+class TestDenseWeightDecay:
+    def test_dense_weight_decay_zero_equals_none(self):
+        rng = np.random.RandomState(42)
+        x = rng.randn(3, 4)
+        grad_output = rng.randn(3, 2)
+
+        layer_no_wd = Dense(4, 2)
+        layer_no_wd.w = rng.randn(4, 2)
+        layer_no_wd.b = np.zeros(2)
+        layer_no_wd.forward(x)
+        layer_no_wd.backward(grad_output)
+
+        layer_wd0 = Dense(4, 2, weight_decay=0.0)
+        layer_wd0.w = layer_no_wd.w.copy()
+        layer_wd0.b = layer_no_wd.b.copy()
+        layer_wd0.forward(x)
+        layer_wd0.backward(grad_output)
+
+        np.testing.assert_array_equal(layer_wd0.grad_w, layer_no_wd.grad_w)
+        np.testing.assert_array_equal(layer_wd0.grad_b, layer_no_wd.grad_b)
+
+    def test_dense_weight_decay_adds_penalty(self):
+        rng = np.random.RandomState(42)
+        x = rng.randn(3, 4)
+        grad_output = rng.randn(3, 2)
+        wd = 1e-4
+
+        layer = Dense(4, 2, weight_decay=wd)
+        layer.w = rng.randn(4, 2)
+        layer.b = np.zeros(2)
+        layer.forward(x)
+        layer.backward(grad_output)
+
+        grad_w_expected = x.T @ grad_output + wd * layer.w
+        np.testing.assert_allclose(layer.grad_w, grad_w_expected)
+
+    def test_dense_weight_decay_bias_not_affected(self):
+        rng = np.random.RandomState(42)
+        x = rng.randn(3, 4)
+        grad_output = rng.randn(3, 2)
+
+        layer_no_wd = Dense(4, 2)
+        layer_no_wd.w = rng.randn(4, 2)
+        layer_no_wd.b = np.zeros(2)
+        layer_no_wd.forward(x)
+        layer_no_wd.backward(grad_output)
+
+        layer_wd = Dense(4, 2, weight_decay=0.1)
+        layer_wd.w = layer_no_wd.w.copy()
+        layer_wd.b = layer_no_wd.b.copy()
+        layer_wd.forward(x)
+        layer_wd.backward(grad_output)
+
+        np.testing.assert_array_equal(layer_wd.grad_b, layer_no_wd.grad_b)
+
+    def test_dqn_weight_decay_passthrough(self):
+        from numpy_rl_racer.agent import DQNAgent
+        agent = DQNAgent(state_dim=4, hidden_sizes=[8], lr=0.01, weight_decay=0.01)
+        for layer in agent.online_net.layers:
+            assert layer.weight_decay == 0.01
+        for layer in agent.target_net.layers:
+            assert layer.weight_decay == 0.01
+
+    def test_dqn_weight_decay_default_zero(self):
+        from numpy_rl_racer.agent import DQNAgent
+        agent = DQNAgent(state_dim=4, hidden_sizes=[8], lr=0.01)
+        for layer in agent.online_net.layers:
+            assert layer.weight_decay == 0.0
+        for layer in agent.target_net.layers:
+            assert layer.weight_decay == 0.0
