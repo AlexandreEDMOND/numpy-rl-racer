@@ -1,6 +1,6 @@
 import numpy as np
 
-from numpy_rl_racer.network import Dense, DuelingMLP, MLP, SGD, relu
+from numpy_rl_racer.network import Adam, Dense, DuelingMLP, MLP, SGD, relu
 from numpy_rl_racer.utils.scheduler import ExponentialDecay, LRScheduler, StepDecay
 
 
@@ -483,3 +483,136 @@ class TestSGDGradientClipping:
         from numpy_rl_racer.agent import DQNAgent
         agent = DQNAgent(state_dim=4, hidden_sizes=[8], lr=0.01)
         assert agent.optimizer.max_grad_norm is None
+
+
+class TestAdam:
+    def test_adam_step(self):
+        rng = np.random.RandomState(42)
+        mlp = MLP([4, 16, 1])
+        x = rng.randn(8, 4)
+        target = rng.randn(8, 1)
+        opt = Adam(mlp, lr=0.1)
+        losses = []
+        for _ in range(100):
+            pred = mlp.forward(x)
+            loss = np.mean((pred - target) ** 2)
+            losses.append(loss)
+            mlp.backward(2.0 * (pred - target) / x.shape[0])
+            opt.step()
+        assert losses[-1] < losses[0]
+        assert losses[-1] < 0.5
+
+    def test_adam_bias_correction(self):
+        mlp = MLP([1, 1])
+        mlp.layers[0].w[:] = 1.0
+        mlp.layers[0].b[:] = 0.0
+        x = np.array([[1.0]])
+        mlp.forward(x)
+        grad = np.array([[2.0]])
+        mlp.backward(grad)
+        opt = Adam(mlp, lr=0.1, betas=(0.9, 0.999))
+        opt.step()
+
+        assert opt._t == 1
+        beta1, beta2 = opt.betas
+        b1_correction = 1.0 - beta1
+        b2_correction = 1.0 - beta2
+
+        state_w = opt._state[mlp.layers[0]]["w"]
+        np.testing.assert_allclose(state_w["m"], b1_correction * 2.0, rtol=1e-6)
+        np.testing.assert_allclose(state_w["v"], b2_correction * 4.0, rtol=1e-6)
+
+        m_hat = state_w["m"] / b1_correction
+        v_hat = state_w["v"] / b2_correction
+        expected_update = 0.1 * m_hat / (np.sqrt(v_hat) + 1e-8)
+        np.testing.assert_allclose(mlp.layers[0].w, 1.0 - expected_update, rtol=1e-6)
+
+        grad_val = float(grad.flat[0])
+        np.testing.assert_allclose(m_hat, grad_val, rtol=1e-6)
+        np.testing.assert_allclose(v_hat, grad_val ** 2, rtol=1e-6)
+
+    def test_adam_state_isolation(self):
+        mlp = MLP([2, 4, 3])
+        rng = np.random.RandomState(42)
+        x = rng.randn(3, 2)
+        mlp.forward(x)
+        mlp.backward(rng.randn(3, 3))
+        opt = Adam(mlp, lr=0.01)
+        opt.step()
+
+        assert len(opt._state) == 2
+        state0_w = opt._state[mlp.layers[0]]["w"]
+        state1_w = opt._state[mlp.layers[1]]["w"]
+
+        original_v = state1_w["v"].copy()
+        state0_w["v"][:] = 999.0
+        np.testing.assert_array_equal(state1_w["v"], original_v)
+
+    def test_adam_weight_decay(self):
+        mlp = MLP([1, 1])
+        mlp.layers[0].w[:] = 5.0
+        mlp.layers[0].b[:] = 0.0
+        x = np.array([[1.0]])
+        mlp.forward(x)
+        mlp.backward(np.zeros((1, 1)))
+
+        opt = Adam(mlp, lr=0.1, weight_decay=0.5)
+        opt.step()
+
+        wd = 0.5
+        lr = 0.1
+        eps = 1e-8
+        g = wd * 5.0
+        m_hat = g
+        v_hat = g ** 2
+        expected_w = 5.0 - lr * m_hat / (np.sqrt(v_hat) + eps)
+        np.testing.assert_allclose(mlp.layers[0].w, expected_w, rtol=1e-6)
+
+    def test_adam_weight_decay_zero_no_effect(self):
+        mlp = MLP([1, 1])
+        mlp.layers[0].w[:] = 5.0
+        mlp.layers[0].b[:] = 0.0
+        x = np.array([[1.0]])
+        mlp.forward(x)
+        mlp.backward(np.zeros((1, 1)))
+
+        opt = Adam(mlp, lr=0.1, weight_decay=0.0)
+        opt.step()
+        np.testing.assert_allclose(mlp.layers[0].w, 5.0, rtol=1e-6)
+
+    def test_adam_with_dqn_integration(self):
+        from numpy_rl_racer.agent import DQNAgent
+        agent = DQNAgent(state_dim=4, hidden_sizes=[8], lr=0.01,
+                         batch_size=16, optimizer_type="adam")
+        rng = np.random.RandomState(42)
+        losses = []
+        for _ in range(200):
+            state = rng.randn(4)
+            action = rng.randint(5)
+            reward = rng.randn()
+            next_state = rng.randn(4)
+            done = rng.random() < 0.1
+            loss = agent.train_step(state, action, reward, next_state, done)
+            if loss > 0:
+                losses.append(loss)
+        assert len(losses) > 20
+        assert losses[-1] < losses[0]
+
+    def test_adam_with_dqn_dueling_integration(self):
+        from numpy_rl_racer.agent import DQNAgent
+        agent = DQNAgent(state_dim=4, hidden_sizes=[8], lr=0.01,
+                         batch_size=16, optimizer_type="adam",
+                         use_dueling_dqn=True)
+        rng = np.random.RandomState(42)
+        losses = []
+        for _ in range(200):
+            state = rng.randn(4)
+            action = rng.randint(5)
+            reward = rng.randn()
+            next_state = rng.randn(4)
+            done = rng.random() < 0.1
+            loss = agent.train_step(state, action, reward, next_state, done)
+            if loss > 0:
+                losses.append(loss)
+        assert len(losses) > 20
+        assert losses[-1] < losses[0]

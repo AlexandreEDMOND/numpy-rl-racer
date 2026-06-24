@@ -110,6 +110,43 @@ class DuelingMLP:
         return f"DuelingMLP(encoder={self.shared_encoder}, value={self.value_layer}, advantage={self.advantage_layer})"
 
 
+class Adam:
+    def __init__(self, mlp, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0):
+        self.mlp = mlp
+        self.lr = lr
+        self.betas = betas
+        self.eps = eps
+        self.weight_decay = weight_decay
+        self._state = {}
+        self._t = 0
+
+    def step(self):
+        self._t += 1
+        beta1, beta2 = self.betas
+        b1t = 1.0 - beta1 ** self._t
+        b2t = 1.0 - beta2 ** self._t
+        for layer in self.mlp.layers:
+            if layer not in self._state:
+                self._state[layer] = {}
+            for name, param, grad in [("w", layer.w, layer.grad_w), ("b", layer.b, layer.grad_b)]:
+                if grad is None:
+                    continue
+                if name not in self._state[layer]:
+                    self._state[layer][name] = {
+                        "m": np.zeros_like(param),
+                        "v": np.zeros_like(param),
+                    }
+                state = self._state[layer][name]
+                g = grad
+                if self.weight_decay > 0.0:
+                    g = g + self.weight_decay * param
+                state["m"] = beta1 * state["m"] + (1.0 - beta1) * g
+                state["v"] = beta2 * state["v"] + (1.0 - beta2) * (g ** 2)
+                m_hat = state["m"] / b1t
+                v_hat = state["v"] / b2t
+                param -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
+
+
 class SGD:
     def __init__(self, mlp, lr=1e-3, scheduler=None, momentum=0.0, max_grad_norm=None):
         self.mlp = mlp

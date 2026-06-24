@@ -2,7 +2,7 @@ import warnings
 
 import numpy as np
 
-from numpy_rl_racer.network import DuelingMLP, MLP, SGD
+from numpy_rl_racer.network import Adam, DuelingMLP, MLP, SGD
 
 
 class SumTree:
@@ -147,7 +147,8 @@ class DQNAgent:
                  use_double_dqn=True, use_per=False, alpha=0.6, beta0=0.4,
                  beta_anneal_steps=100000, tau=0.0, seed=None,
                  use_dueling_dqn=False, n_step=1, scheduler=None,
-                 momentum=0.0, weight_decay=0.0, max_grad_norm=None):
+                 momentum=0.0, weight_decay=0.0, max_grad_norm=None,
+                 optimizer_type="sgd"):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
         self.state_dim = state_dim
@@ -159,12 +160,21 @@ class DQNAgent:
         else:
             self.online_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
             self.target_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
-        for layer in self.online_net.layers:
-            layer.weight_decay = weight_decay
-        for layer in self.target_net.layers:
-            layer.weight_decay = weight_decay
+        if optimizer_type == "adam":
+            for layer in self.online_net.layers:
+                layer.weight_decay = 0.0
+            for layer in self.target_net.layers:
+                layer.weight_decay = 0.0
+        else:
+            for layer in self.online_net.layers:
+                layer.weight_decay = weight_decay
+            for layer in self.target_net.layers:
+                layer.weight_decay = weight_decay
         self._hard_update_target()
-        self.optimizer = SGD(self.online_net, lr=lr, scheduler=scheduler, momentum=momentum, max_grad_norm=max_grad_norm)
+        if optimizer_type == "adam":
+            self.optimizer = Adam(self.online_net, lr=lr, eps=1e-8, weight_decay=weight_decay)
+        else:
+            self.optimizer = SGD(self.online_net, lr=lr, scheduler=scheduler, momentum=momentum, max_grad_norm=max_grad_norm)
         self.use_per = use_per
         if use_per:
             self.replay_buffer = PrioritizedReplayBuffer(buffer_size, alpha=alpha, beta0=beta0,
@@ -195,7 +205,7 @@ class DQNAgent:
         for i, layer in enumerate(self.target_net.layers):
             params[f"tlayer_{i}_w"] = layer.w
             params[f"tlayer_{i}_b"] = layer.b
-        if self.optimizer._velocities is not None:
+        if getattr(self.optimizer, '_velocities', None) is not None:
             for i, layer in enumerate(self.online_net.layers):
                 vel = self.optimizer._velocities.get(layer)
                 if vel is not None:
@@ -299,7 +309,7 @@ class DQNAgent:
                     layer.b[:] = data[key_b]
         else:
             self._hard_update_target()
-        if self.optimizer.momentum > 0 and "vel_0_w" in data:
+        if getattr(self.optimizer, 'momentum', 0.0) > 0 and "vel_0_w" in data:
             if self.optimizer._velocities is None:
                 self.optimizer._velocities = {}
             for i, layer in enumerate(self.online_net.layers):

@@ -1,3 +1,3 @@
-from .network import Dense, DuelingMLP, MLP, SGD, mse_loss, relu
+from .network import Adam, Dense, DuelingMLP, MLP, SGD, mse_loss, relu
 
-__all__ = ["Dense", "DuelingMLP", "MLP", "SGD", "mse_loss", "relu"]
+__all__ = ["Adam", "Dense", "DuelingMLP", "MLP", "SGD", "mse_loss", "relu"]
