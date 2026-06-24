@@ -1,7 +1,7 @@
 import numpy as np
 
 from numpy_rl_racer.network import Dense, DuelingMLP, MLP, NoisyLinear, SGD, Adam, mse_loss, relu
-from numpy_rl_racer.utils.scheduler import ExponentialDecay, LRScheduler, StepDecay
+from numpy_rl_racer.utils.scheduler import ExponentialDecay, LinearWarmup, LRScheduler, StepDecay
 
 
 def test_relu_positive():
@@ -333,6 +333,92 @@ class TestLRSchedulerBase:
             assert False, "Expected NotImplementedError"
         except NotImplementedError:
             pass
+
+
+class TestLinearWarmup:
+    def test_lr_at_step_zero_equals_initial_lr(self):
+        sched = LinearWarmup(initial_lr=0.0, final_lr=0.1, warmup_steps=10)
+        assert sched.lr == 0.0
+
+    def test_lr_at_midpoint(self):
+        sched = LinearWarmup(initial_lr=0.0, final_lr=1.0, warmup_steps=10)
+        for _ in range(5):
+            sched.step()
+        assert abs(sched.lr - 0.5) < 1e-10
+
+    def test_lr_at_warmup_steps_equals_final_lr(self):
+        sched = LinearWarmup(initial_lr=0.0, final_lr=1.0, warmup_steps=10)
+        for _ in range(10):
+            sched.step()
+        assert sched.lr == 1.0
+
+    def test_lr_plateaus_after_warmup(self):
+        sched = LinearWarmup(initial_lr=0.0, final_lr=1.0, warmup_steps=10)
+        for _ in range(11):
+            sched.step()
+        assert sched.lr == 1.0
+
+    def test_post_scheduler_decays_after_warmup(self):
+        post = ExponentialDecay(1.0, 0.5)
+        sched = LinearWarmup(initial_lr=0.0, final_lr=1.0, warmup_steps=5, post_scheduler=post)
+        for _ in range(5):
+            sched.step()
+        assert sched.lr == 1.0
+        sched.step()
+        assert sched.lr == 0.5
+        sched.step()
+        assert sched.lr == 0.25
+
+    def test_works_with_sgd_optimizer(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(2, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(2, 1))
+        sched = LinearWarmup(initial_lr=0.0, final_lr=0.1, warmup_steps=5)
+        opt = SGD(mlp, scheduler=sched)
+        assert opt.lr == 0.0
+        opt.step()
+        assert abs(opt.lr - 0.02) < 1e-10
+
+    def test_warmup_steps_zero(self):
+        sched = LinearWarmup(initial_lr=0.0, final_lr=0.1, warmup_steps=0)
+        assert sched.lr == 0.0
+        sched.step()
+        assert sched.lr == 0.1
+
+    def test_initial_lr_equals_final_lr(self):
+        sched = LinearWarmup(initial_lr=0.5, final_lr=0.5, warmup_steps=10)
+        for _ in range(5):
+            sched.step()
+        assert sched.lr == 0.5
+
+    def test_post_scheduler_none_plateaus(self):
+        sched = LinearWarmup(initial_lr=0.0, final_lr=0.1, warmup_steps=5)
+        for _ in range(10):
+            sched.step()
+        assert sched.lr == 0.1
+
+    def test_nonzero_initial_lr_midpoint(self):
+        sched = LinearWarmup(initial_lr=0.2, final_lr=1.0, warmup_steps=10)
+        for _ in range(5):
+            sched.step()
+        assert abs(sched.lr - 0.6) < 1e-10
+
+    def test_sgd_loss_decreases_on_toy_task(self):
+        mlp = MLP([1, 4, 1])
+        rng = np.random.RandomState(42)
+        X = rng.randn(16, 1)
+        y = 2.0 * X + 0.5
+        sched = LinearWarmup(initial_lr=0.0, final_lr=0.001, warmup_steps=10)
+        opt = SGD(mlp, scheduler=sched)
+        losses = []
+        for _ in range(100):
+            pred = mlp.forward(X)
+            loss = mse_loss(pred, y)
+            losses.append(loss)
+            mlp.backward(pred - y)
+            opt.step()
+        assert losses[-1] < losses[0]
 
 
 class TestDenseWeightDecay:
