@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+from contextlib import nullcontext
 
 import numpy as np
 
@@ -204,6 +205,7 @@ def main(argv=None):
         f"lr_scheduler={scheduler_str}"
     )
 
+    _ctx = nullcontext()
     logger = None
     if args.log_dir:
         from numpy_rl_racer.utils.logging import TrainingLogger
@@ -212,8 +214,9 @@ def main(argv=None):
             fieldnames.extend(["eval_reward_mean", "eval_reward_std"])
         if args.lr_scheduler != "none":
             fieldnames.append("lr")
-        logger = TrainingLogger(os.path.join(args.log_dir, "training_log.csv"),
+        _ctx = TrainingLogger(os.path.join(args.log_dir, "training_log.csv"),
                                 fieldnames=fieldnames)
+        logger = _ctx
 
     episode_rewards = []
     episode_losses = []
@@ -222,88 +225,86 @@ def main(argv=None):
     eval_reward_means = []
     eval_reward_stds = []
 
-    for ep in range(1, args.episodes + 1):
-        state = env.reset(seed=args.seed)
-        if args.seed is not None:
-            args.seed += 1
+    with _ctx:
+        for ep in range(1, args.episodes + 1):
+            state = env.reset(seed=args.seed)
+            if args.seed is not None:
+                args.seed += 1
 
-        ep_reward = 0.0
-        ep_losses = []
-        ep_q_vals = []
+            ep_reward = 0.0
+            ep_losses = []
+            ep_q_vals = []
 
-        for step in range(args.max_steps):
-            action_idx = agent.act(state)
-            next_state, reward, done, info = env.step(ACTIONS[action_idx])
-            loss = agent.train_step(state, action_idx, reward, next_state, done)
-            ep_reward += reward
-            if loss > 0:
-                ep_losses.append(loss)
-                ep_q_vals.append(agent._last_avg_q)
-            state = next_state
-            if done:
-                break
+            for step in range(args.max_steps):
+                action_idx = agent.act(state)
+                next_state, reward, done, info = env.step(ACTIONS[action_idx])
+                loss = agent.train_step(state, action_idx, reward, next_state, done)
+                ep_reward += reward
+                if loss > 0:
+                    ep_losses.append(loss)
+                    ep_q_vals.append(agent._last_avg_q)
+                state = next_state
+                if done:
+                    break
 
-        avg_loss = np.mean(ep_losses) if ep_losses else float("nan")
-        avg_q = np.mean(ep_q_vals) if ep_q_vals else float("nan")
-        episode_rewards.append(ep_reward)
-        episode_losses.append(avg_loss)
+            avg_loss = np.mean(ep_losses) if ep_losses else float("nan")
+            avg_q = np.mean(ep_q_vals) if ep_q_vals else float("nan")
+            episode_rewards.append(ep_reward)
+            episode_losses.append(avg_loss)
 
-        print(
-            f"ep={ep:4d}/{args.episodes}  "
-            f"reward={ep_reward:7.2f}  "
-            f"loss={avg_loss:.6f}  "
-            f"eps={agent.epsilon:.3f}  "
-            f"steps={step + 1:3d}"
-        )
+            print(
+                f"ep={ep:4d}/{args.episodes}  "
+                f"reward={ep_reward:7.2f}  "
+                f"loss={avg_loss:.6f}  "
+                f"eps={agent.epsilon:.3f}  "
+                f"steps={step + 1:3d}"
+            )
 
-        log_kwargs = dict(
-            episode=ep,
-            total_reward=ep_reward,
-            steps=step + 1,
-            avg_loss=avg_loss,
-            epsilon=agent.epsilon,
-            avg_q_value=avg_q,
-            elapsed_time=info.get('elapsed_time', 0.0),
-        )
-        if args.lr_scheduler != "none":
-            log_kwargs["lr"] = agent.optimizer.lr
+            log_kwargs = dict(
+                episode=ep,
+                total_reward=ep_reward,
+                steps=step + 1,
+                avg_loss=avg_loss,
+                epsilon=agent.epsilon,
+                avg_q_value=avg_q,
+                elapsed_time=info.get('elapsed_time', 0.0),
+            )
+            if args.lr_scheduler != "none":
+                log_kwargs["lr"] = agent.optimizer.lr
 
-        if args.eval_freq > 0 and ep % args.eval_freq == 0:
-            original_epsilon = agent.epsilon
-            agent.epsilon = 0.0
-            _eval_rewards = []
-            for _ in range(args.eval_episodes):
-                state = env.reset(seed=args.seed)
-                if args.seed is not None:
-                    args.seed += 1
-                _ep_eval_reward = 0.0
-                for _ in range(args.max_steps):
-                    action_idx = agent.act(state)
-                    next_state, reward, done, _ = env.step(ACTIONS[action_idx])
-                    _ep_eval_reward += reward
-                    state = next_state
-                    if done:
-                        break
-                _eval_rewards.append(_ep_eval_reward)
-            agent.epsilon = original_epsilon
-            eval_mean = np.mean(_eval_rewards)
-            eval_std = np.std(_eval_rewards)
-            eval_at_episodes.append(ep)
-            eval_reward_means.append(eval_mean)
-            eval_reward_stds.append(eval_std)
-            print(f"  eval: reward={eval_mean:.2f} +/- {eval_std:.2f}")
-            log_kwargs["eval_reward_mean"] = eval_mean
-            log_kwargs["eval_reward_std"] = eval_std
+            if args.eval_freq > 0 and ep % args.eval_freq == 0:
+                original_epsilon = agent.epsilon
+                agent.epsilon = 0.0
+                _eval_rewards = []
+                for _ in range(args.eval_episodes):
+                    state = env.reset(seed=args.seed)
+                    if args.seed is not None:
+                        args.seed += 1
+                    _ep_eval_reward = 0.0
+                    for _ in range(args.max_steps):
+                        action_idx = agent.act(state)
+                        next_state, reward, done, _ = env.step(ACTIONS[action_idx])
+                        _ep_eval_reward += reward
+                        state = next_state
+                        if done:
+                            break
+                    _eval_rewards.append(_ep_eval_reward)
+                agent.epsilon = original_epsilon
+                eval_mean = np.mean(_eval_rewards)
+                eval_std = np.std(_eval_rewards)
+                eval_at_episodes.append(ep)
+                eval_reward_means.append(eval_mean)
+                eval_reward_stds.append(eval_std)
+                print(f"  eval: reward={eval_mean:.2f} +/- {eval_std:.2f}")
+                log_kwargs["eval_reward_mean"] = eval_mean
+                log_kwargs["eval_reward_std"] = eval_std
 
-        if logger:
-            logger.log(**log_kwargs)
+            if logger:
+                logger.log(**log_kwargs)
 
-        if ep_reward > best_reward:
-            best_reward = ep_reward
-            agent.save(os.path.join(args.save_dir, "best_model.npz"))
-
-    if logger:
-        logger.close()
+            if ep_reward > best_reward:
+                best_reward = ep_reward
+                agent.save(os.path.join(args.save_dir, "best_model.npz"))
 
     agent.save(os.path.join(args.save_dir, "final_model.npz"))
     print(f"\nTraining complete. Best reward: {best_reward:.2f}")

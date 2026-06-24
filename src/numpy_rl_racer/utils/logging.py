@@ -13,7 +13,17 @@ class TrainingLogger:
         self.writer.writeheader()
         self.file.flush()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
     def log(self, episode, **metrics):
+        unknown = [k for k in metrics if k not in self.fieldnames]
+        if unknown:
+            raise ValueError(f"Unknown metric(s): {unknown}. Valid fieldnames: {self.fieldnames}")
         row = {"episode": episode}
         row.update(metrics)
         self.writer.writerow(row)
