@@ -1,4 +1,7 @@
+import warnings
+
 import numpy as np
+import pytest
 
 from numpy_rl_racer.agent.dqn import DQNAgent
 
@@ -184,5 +187,109 @@ def test_dueling_checkpoint(tmp_path):
         np.testing.assert_array_equal(l1.w, l2.w)
         np.testing.assert_array_equal(l1.b, l2.b)
     for l1, l2 in zip(agent.target_net.layers, agent2.target_net.layers):
+        np.testing.assert_array_equal(l1.w, l2.w)
+        np.testing.assert_array_equal(l1.b, l2.b)
+
+
+def test_save_metadata(tmp_path):
+    agent_mlp = DQNAgent(state_dim=6, hidden_sizes=[32, 32], seed=42)
+    path_mlp = str(tmp_path / "mlp.npz")
+    agent_mlp.save(path_mlp)
+    data_mlp = np.load(path_mlp)
+    assert "arch_type" in data_mlp
+    assert "hidden_sizes" in data_mlp
+    assert "use_dueling_dqn" in data_mlp
+    assert "state_dim" in data_mlp
+    assert "n_actions" in data_mlp
+    assert int(data_mlp["arch_type"]) == 0
+    assert list(data_mlp["hidden_sizes"]) == [32, 32]
+    assert int(data_mlp["use_dueling_dqn"]) == 0
+    assert int(data_mlp["state_dim"]) == 6
+    data_mlp.close()
+
+    agent_dueling = DQNAgent(state_dim=8, hidden_sizes=[64], use_dueling_dqn=True, seed=42)
+    path_dueling = str(tmp_path / "dueling.npz")
+    agent_dueling.save(path_dueling)
+    data_dueling = np.load(path_dueling)
+    assert int(data_dueling["arch_type"]) == 1
+    assert list(data_dueling["hidden_sizes"]) == [64]
+    assert int(data_dueling["use_dueling_dqn"]) == 1
+    assert int(data_dueling["state_dim"]) == 8
+    data_dueling.close()
+
+
+def test_load_metadata_match(tmp_path):
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], use_dueling_dqn=True, seed=42)
+    path = str(tmp_path / "match.npz")
+    agent.save(path)
+
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], use_dueling_dqn=True, seed=99)
+    agent2.load(path)
+
+    for l1, l2 in zip(agent.online_net.layers, agent2.online_net.layers):
+        np.testing.assert_array_equal(l1.w, l2.w)
+        np.testing.assert_array_equal(l1.b, l2.b)
+
+
+def test_load_metadata_mismatch_dueling_into_mlp(tmp_path):
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], use_dueling_dqn=True, seed=42)
+    path = str(tmp_path / "dueling.npz")
+    agent.save(path)
+
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], use_dueling_dqn=False, seed=99)
+    with pytest.raises(ValueError, match="dueling architecture"):
+        agent2.load(path)
+
+
+def test_load_metadata_mismatch_mlp_into_dueling(tmp_path):
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], use_dueling_dqn=False, seed=42)
+    path = str(tmp_path / "mlp.npz")
+    agent.save(path)
+
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], use_dueling_dqn=True, seed=99)
+    with pytest.raises(ValueError, match="MLP architecture"):
+        agent2.load(path)
+
+
+def test_load_metadata_hidden_size_mismatch(tmp_path):
+    agent = DQNAgent(state_dim=6, hidden_sizes=[32, 32], use_dueling_dqn=False, seed=42)
+    path = str(tmp_path / "mlp.npz")
+    agent.save(path)
+
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[64, 64], use_dueling_dqn=False, seed=99)
+    with pytest.raises(ValueError, match="hidden_sizes"):
+        agent2.load(path)
+
+
+def test_load_metadata_state_dim_mismatch(tmp_path):
+    agent = DQNAgent(state_dim=8, hidden_sizes=[16], use_dueling_dqn=False, seed=42)
+    path = str(tmp_path / "mlp_8d.npz")
+    agent.save(path)
+
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], use_dueling_dqn=False, seed=99)
+    with pytest.raises(ValueError, match="state_dim"):
+        agent2.load(path)
+
+
+def test_legacy_npz_no_metadata(tmp_path):
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], seed=42)
+    params = {}
+    for i, layer in enumerate(agent.online_net.layers):
+        params[f"layer_{i}_w"] = layer.w
+        params[f"layer_{i}_b"] = layer.b
+    for i, layer in enumerate(agent.target_net.layers):
+        params[f"tlayer_{i}_w"] = layer.w
+        params[f"tlayer_{i}_b"] = layer.b
+    path = str(tmp_path / "legacy_no_meta.npz")
+    np.savez(path, **params)
+
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], seed=99)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        agent2.load(path)
+        assert len(w) == 1
+        assert "does not contain architecture metadata" in str(w[0].message).lower()
+
+    for l1, l2 in zip(agent.online_net.layers, agent2.online_net.layers):
         np.testing.assert_array_equal(l1.w, l2.w)
         np.testing.assert_array_equal(l1.b, l2.b)
