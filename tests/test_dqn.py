@@ -413,7 +413,106 @@ def test_dqn_per_regression_uniform():
     agent_per = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-2, batch_size=8,
                          use_per=True)
 
-    # After identical training (limited steps so priorities remain similar),
-    # per=False should be the default
     assert not agent_uniform.use_per
     assert agent_per.use_per
+
+
+# -- Soft target network updates (Polyak averaging) -------------------------
+
+def test_tau_zero_preserves_hard_update():
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=0.0, batch_size=4,
+                     target_update_freq=5, tau=0.0)
+    for layer in agent.online_net.layers:
+        layer.w[:] = 1.0
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for _ in range(4):
+        agent.replay_buffer.push(state, 0, 0.0, state, False)
+    for _ in range(4):
+        agent.train_step(state, 0, 0.0, state, False)
+    assert not np.allclose(agent.online_net.layers[0].w,
+                           agent.target_net.layers[0].w)
+    agent.train_step(state, 0, 0.0, state, False)
+    for src, dst in zip(agent.online_net.layers, agent.target_net.layers):
+        np.testing.assert_array_equal(src.w, dst.w)
+        np.testing.assert_array_equal(src.b, dst.b)
+
+
+def test_tau_half_weighted_average():
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=0.0, batch_size=4,
+                     target_update_freq=1000, tau=0.5)
+    for layer in agent.online_net.layers:
+        layer.w[:] = 1.0
+        layer.b[:] = 2.0
+    for layer in agent.target_net.layers:
+        layer.w[:] = 3.0
+        layer.b[:] = 4.0
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for _ in range(4):
+        agent.replay_buffer.push(state, 0, 0.0, state, False)
+    agent.train_step(state, 0, 0.0, state, False)
+    for layer in agent.target_net.layers:
+        np.testing.assert_array_almost_equal(layer.w, 2.0)
+        np.testing.assert_array_almost_equal(layer.b, 3.0)
+
+
+def test_tau_convergence():
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=0.0, batch_size=4,
+                     target_update_freq=1000, tau=0.1)
+    for layer in agent.online_net.layers:
+        layer.w[:] = 5.0
+    for layer in agent.target_net.layers:
+        layer.w[:] = 0.0
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for _ in range(4):
+        agent.replay_buffer.push(state, 0, 0.0, state, False)
+    for _ in range(50):
+        agent.train_step(state, 0, 0.0, state, False)
+    expected = 5.0 * (1.0 - 0.9 ** 50)
+    for layer in agent.target_net.layers:
+        np.testing.assert_array_almost_equal(layer.w, expected, decimal=5)
+
+
+def test_tau_one_hard_copy():
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=0.0, batch_size=4,
+                     target_update_freq=1000, tau=1.0)
+    for layer in agent.online_net.layers:
+        layer.w[:] = 1.0
+    for layer in agent.target_net.layers:
+        layer.w[:] = 0.0
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for _ in range(4):
+        agent.replay_buffer.push(state, 0, 0.0, state, False)
+    agent.train_step(state, 0, 0.0, state, False)
+    for layer in agent.target_net.layers:
+        np.testing.assert_array_equal(layer.w, 1.0)
+
+
+def test_training_step_with_soft_update():
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, batch_size=4,
+                     tau=0.005)
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for _ in range(20):
+        action = agent.act(state, training=True)
+        next_state = state + np.random.randn(6) * 0.01
+        reward = 0.1
+        done = False
+        loss = agent.train_step(state, action, reward, next_state, done)
+        assert isinstance(loss, float)
+
+
+def test_save_load_round_trip_soft_update(tmp_path):
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, tau=0.005)
+    for layer in agent.online_net.layers:
+        layer.w[:] = 1.0
+        layer.b[:] = 2.0
+    agent._soft_update_target(0.005)
+    path = str(tmp_path / "soft_model.npz")
+    agent.save(path)
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, tau=0.005)
+    agent2.load(path)
+    for l1, l2 in zip(agent.online_net.layers, agent2.online_net.layers):
+        np.testing.assert_array_equal(l1.w, l2.w)
+        np.testing.assert_array_equal(l1.b, l2.b)
+    for l1, l2 in zip(agent2.online_net.layers, agent2.target_net.layers):
+        np.testing.assert_array_equal(l1.w, l2.w)
+        np.testing.assert_array_equal(l1.b, l2.b)
