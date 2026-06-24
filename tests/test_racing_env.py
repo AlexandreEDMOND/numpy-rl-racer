@@ -92,6 +92,7 @@ def test_info_dict_contains_goal_and_progress():
     assert 'progress' in info
     assert 'lap_count' in info
     assert 'goal_position' in info
+    assert 'elapsed_time' in info
 
 
 def test_progress_computation_known_points():
@@ -515,3 +516,86 @@ def test_empty_obstacles_list_backward_compatible():
     env = RacingEnv(obstacles=[])
     obs = env.reset(seed=42)
     assert obs.shape == (6,), "No obstacles should give 6-dim observation"
+
+
+# ── Elapsed time ──────────────────────────────────────────────────────
+
+
+def test_elapsed_time_starts_zero_after_reset():
+    env = RacingEnv()
+    env.reset(seed=42)
+    assert env.elapsed_time == np.float64(0.0)
+
+
+def test_elapsed_time_increments_by_dt_per_step():
+    env = RacingEnv(dt=0.1)
+    env.reset(seed=42)
+    for i in range(5):
+        _, _, _, info = env.step(np.array([0.0, 2.0]))
+        np.testing.assert_almost_equal(info['elapsed_time'], (i + 1) * 0.1)
+
+
+def test_elapsed_time_resets_on_reset():
+    env = RacingEnv()
+    env.reset(seed=42)
+    env.step(np.array([0.0, 2.0]))
+    env.step(np.array([0.0, 2.0]))
+    assert env.elapsed_time > 0.0
+    env.reset(seed=42)
+    assert env.elapsed_time == np.float64(0.0)
+
+
+def test_info_elapsed_time_matches_env_attribute():
+    env = RacingEnv()
+    env.reset(seed=42)
+    _, _, _, info = env.step(np.array([0.0, 2.0]))
+    assert info['elapsed_time'] == env.elapsed_time
+
+
+# ── Time penalty ──────────────────────────────────────────────────────
+
+
+def test_time_penalty_zero_is_backward_compatible():
+    env_default = RacingEnv(time_penalty=0.0)
+    env_default.reset(seed=42)
+    env_base = RacingEnv()
+    env_base.reset(seed=42)
+    for _ in range(10):
+        a = np.array([0.0, 2.0])
+        _, r1, _, _ = env_default.step(a)
+        _, r2, _, _ = env_base.step(a)
+        assert r1 == r2, (
+            f"time_penalty=0.0 should match default env; got {r1} vs {r2}"
+        )
+
+
+def test_time_penalty_reduces_reward():
+    env_no_penalty = RacingEnv(time_penalty=0.0, randomize_start=False)
+    env_penalty = RacingEnv(time_penalty=0.1, randomize_start=False)
+    env_no_penalty.reset(seed=42)
+    env_penalty.reset(seed=42)
+    cum_no_penalty = 0.0
+    cum_penalty = 0.0
+    a = np.array([0.0, 2.0])
+    for _ in range(20):
+        _, r1, _, _ = env_no_penalty.step(a)
+        _, r2, _, _ = env_penalty.step(a)
+        cum_no_penalty += r1
+        cum_penalty += r2
+    assert cum_penalty < cum_no_penalty, (
+        f"time_penalty should reduce cumulative reward; "
+        f"no_penalty={cum_no_penalty} penalty={cum_penalty}"
+    )
+
+
+def test_time_penalty_magnitude():
+    env = RacingEnv(time_penalty=0.1, dt=0.05, randomize_start=False)
+    env.reset(seed=42)
+    _, r1, _, info1 = env.step(np.array([0.0, 0.0]))
+    _, r2, _, info2 = env.step(np.array([0.0, 0.0]))
+    # Each step loses 0.1 * 0.05 = 0.005 from time penalty
+    elapsed = info2['elapsed_time']
+    assert elapsed == 2 * 0.05
+    np.testing.assert_almost_equal(
+        r2, np.float64(0.1) - np.float64(0.1) * np.float64(0.05), decimal=12
+    )

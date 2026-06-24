@@ -108,6 +108,8 @@ def main(argv=None):
                         help="Number of evaluation episodes per eval run")
     parser.add_argument("--no-randomize-start", action="store_false", dest="randomize_start", default=True,
                         help="Disable randomized start position (default: enabled)")
+    parser.add_argument("--time-penalty", type=float, default=0.0,
+                        help="Time penalty per second of elapsed time (default: 0.0)")
 
     known_args, _ = parser.parse_known_args(argv)
     if known_args.config:
@@ -126,9 +128,9 @@ def main(argv=None):
 
     if args.track == "circular":
         track = CircularTrack(radius=6.0, track_width=2.0)
-        env = RacingEnv(track=track, randomize_start=args.randomize_start)
+        env = RacingEnv(track=track, randomize_start=args.randomize_start, time_penalty=args.time_penalty)
     else:
-        env = RacingEnv(randomize_start=args.randomize_start)
+        env = RacingEnv(randomize_start=args.randomize_start, time_penalty=args.time_penalty)
 
     print(f"Track type: {args.track}")
     scheduler = None
@@ -169,7 +171,7 @@ def main(argv=None):
     logger = None
     if args.log_dir:
         from numpy_rl_racer.utils.logging import TrainingLogger
-        fieldnames = ["episode", "total_reward", "steps", "avg_loss", "epsilon", "avg_q_value"]
+        fieldnames = ["episode", "total_reward", "steps", "avg_loss", "epsilon", "avg_q_value", "elapsed_time"]
         if args.eval_freq > 0:
             fieldnames.extend(["eval_reward_mean", "eval_reward_std"])
         if args.lr_scheduler != "none":
@@ -195,7 +197,7 @@ def main(argv=None):
 
         for step in range(args.max_steps):
             action_idx = agent.act(state)
-            next_state, reward, done, _ = env.step(ACTIONS[action_idx])
+            next_state, reward, done, info = env.step(ACTIONS[action_idx])
             loss = agent.train_step(state, action_idx, reward, next_state, done)
             ep_reward += reward
             if loss > 0:
@@ -225,6 +227,7 @@ def main(argv=None):
             avg_loss=avg_loss,
             epsilon=agent.epsilon,
             avg_q_value=avg_q,
+            elapsed_time=info.get('elapsed_time', 0.0),
         )
         if args.lr_scheduler != "none":
             log_kwargs["lr"] = agent.optimizer.lr

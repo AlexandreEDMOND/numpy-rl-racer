@@ -7,7 +7,7 @@ class TrainingLogger:
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         self.file = open(filepath, "w", newline="")
         if fieldnames is None:
-            fieldnames = ["episode", "total_reward", "steps", "avg_loss", "epsilon", "avg_q_value"]
+            fieldnames = ["episode", "total_reward", "steps", "avg_loss", "epsilon", "avg_q_value", "elapsed_time"]
         self.fieldnames = fieldnames
         self.writer = csv.DictWriter(self.file, fieldnames=self.fieldnames)
         self.writer.writeheader()
