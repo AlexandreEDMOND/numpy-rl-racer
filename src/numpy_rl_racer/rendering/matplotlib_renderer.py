@@ -1,13 +1,22 @@
 import numpy as np
 from matplotlib.path import Path
 import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
 
 
 class MatplotlibRenderer:
-    def __init__(self, track, figsize=(8, 6)):
+    def __init__(self, track, figsize=(8, 6), headless=False):
         self.track = track
-        self.fig, self.ax = plt.subplots(figsize=figsize)
+        self._headless = headless
+        if headless:
+            from matplotlib.figure import Figure
+            from matplotlib.backends.backend_agg import FigureCanvasAgg
+            self.fig = Figure(figsize=figsize)
+            FigureCanvasAgg(self.fig)
+            self.ax = self.fig.add_subplot(111)
+        else:
+            import matplotlib.pyplot as plt
+            self._plt = plt
+            self.fig, self.ax = plt.subplots(figsize=figsize)
         self.ax.set_aspect("equal")
         self._draw_background()
 
@@ -93,10 +102,17 @@ class MatplotlibRenderer:
         self.ax.set_title(title)
 
         self.fig.canvas.draw_idle()
-        plt.pause(0.01)
+        if not self._headless:
+            import matplotlib.pyplot as plt
+            plt.pause(0.01)
 
     def show(self):
-        plt.show(block=True)
+        if self._headless:
+            print("[Headless mode] show() is a no-op")
+        else:
+            self._plt.show(block=True)
 
     def close(self):
-        plt.close(self.fig)
+        if not self._headless:
+            self._plt.close(self.fig)
+        self.fig.clear()
