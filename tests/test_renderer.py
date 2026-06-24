@@ -232,3 +232,33 @@ def test_recording_figure8_saves_nonempty_gif(tmp_path):
     assert gif_path.exists()
     assert gif_path.stat().st_size > 0
     renderer.close()
+
+
+# ── Reward Line Rendering Tests ───────────────────────────────────────
+
+
+def test_renderer_accepts_reward_line_progress():
+    track = RectangularTrack()
+    reward_progress = [0.25, 0.5, 0.75]
+    renderer = MatplotlibRenderer(track, headless=True, reward_line_progress=reward_progress)
+    assert len(renderer._reward_line_endpoints) == 3
+    renderer.close()
+
+
+def test_reward_lines_drawn_when_provided():
+    track = RectangularTrack()
+    reward_progress = [0.25, 0.5, 0.75]
+    renderer = MatplotlibRenderer(track, headless=True, reward_line_progress=reward_progress)
+    state = CarState(x=0.0, y=0.0, heading=0.0, velocity=0.0)
+    renderer.render(state)
+    lines = renderer.ax.get_lines()
+    # Should contain the reward lines with #2e86c1 color
+    assert any("#2e86c1" in str(line.get_color()) for line in lines)
+    renderer.close()
+
+
+def test_reward_lines_empty_when_not_provided():
+    track = RectangularTrack()
+    renderer = MatplotlibRenderer(track, headless=True)
+    assert len(renderer._reward_line_endpoints) == 0
+    renderer.close()
