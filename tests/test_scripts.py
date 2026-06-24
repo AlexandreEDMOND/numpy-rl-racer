@@ -701,3 +701,127 @@ def test_obstacles_config_keys(tmp_path):
         saved = json.load(f)
     assert saved["num_obstacles"] == 4
     assert saved["obstacle_seed"] == 123
+
+
+# ---------------------------------------------------------------------------
+# Grid search tests
+# ---------------------------------------------------------------------------
+
+def _make_grid_search():
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from grid_search import main
+        return main
+    finally:
+        sys.path[:] = orig_path
+
+
+def test_grid_search_help(capsys):
+    gs_main = _make_grid_search()
+    with pytest.raises(SystemExit):
+        gs_main(["--help"])
+    captured = capsys.readouterr()
+    assert "grid search" in captured.out.lower()
+
+
+def test_grid_search_basic(tmp_path):
+    gs_main = _make_grid_search()
+    csv_path = str(tmp_path / "results.csv")
+    plot_path = str(tmp_path / "plot.png")
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.5), \
+         patch.object(DQNAgent, "save"):
+        gs_main([
+            "--episodes", "2",
+            "--max-steps", "3",
+            "--lr", "1e-3,1e-2",
+            "--gamma", "0.99,0.95",
+            "--output", csv_path,
+            "--plot", plot_path,
+        ])
+    assert os.path.exists(csv_path)
+    with open(csv_path, newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 4  # 2x2 combos
+
+
+def test_grid_search_csv_columns(tmp_path):
+    gs_main = _make_grid_search()
+    csv_path = str(tmp_path / "results.csv")
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.5), \
+         patch.object(DQNAgent, "save"):
+        gs_main([
+            "--episodes", "2",
+            "--max-steps", "3",
+            "--lr", "1e-3,1e-2",
+            "--gamma", "0.99,0.95",
+            "--output", csv_path,
+        ])
+    expected = {"run_id", "params", "final_reward", "mean_reward", "std_reward",
+                "final_loss", "mean_loss", "total_steps", "elapsed_time"}
+    with open(csv_path, newline="") as f:
+        reader = csv.DictReader(f)
+        assert set(reader.fieldnames) == expected
+        for row in reader:
+            assert int(row["run_id"]) >= 0
+            float(row["final_reward"])
+            float(row["mean_reward"])
+            float(row["std_reward"])
+            float(row["final_loss"])
+            float(row["mean_loss"])
+            json.loads(row["params"])
+
+
+def test_grid_search_plot(tmp_path):
+    gs_main = _make_grid_search()
+    csv_path = str(tmp_path / "results.csv")
+    plot_path = str(tmp_path / "plot.png")
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.5), \
+         patch.object(DQNAgent, "save"):
+        gs_main([
+            "--episodes", "2",
+            "--max-steps", "3",
+            "--lr", "1e-3,1e-2",
+            "--gamma", "0.99,0.95",
+            "--output", csv_path,
+            "--plot", plot_path,
+        ])
+    assert os.path.exists(plot_path)
+    assert os.path.getsize(plot_path) > 0
+
+
+def test_grid_search_seed(tmp_path):
+    gs_main = _make_grid_search()
+    csv_a = str(tmp_path / "a.csv")
+    csv_b = str(tmp_path / "b.csv")
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.5), \
+         patch.object(DQNAgent, "save"):
+        gs_main([
+            "--seed", "42",
+            "--episodes", "2",
+            "--max-steps", "3",
+            "--lr", "1e-3,1e-2",
+            "--output", csv_a,
+        ])
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.5), \
+         patch.object(DQNAgent, "save"):
+        gs_main([
+            "--seed", "42",
+            "--episodes", "2",
+            "--max-steps", "3",
+            "--lr", "1e-3,1e-2",
+            "--output", csv_b,
+        ])
+    with open(csv_a, newline="") as f:
+        rows_a = list(csv.DictReader(f))
+    with open(csv_b, newline="") as f:
+        rows_b = list(csv.DictReader(f))
+    assert len(rows_a) == len(rows_b)
+    for ra, rb in zip(rows_a, rows_b):
+        assert ra["params"] == rb["params"]
