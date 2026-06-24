@@ -376,15 +376,14 @@ def test_circular_track_progress_increases_when_moving_forward():
 # ── Goal-distance reward shaping ─────────────────────────────────────
 
 
-def test_reward_includes_goal_distance_shaping():
+def test_reward_includes_progress_shaping():
     env = RacingEnv()
     env.reset(seed=42)
-    gx, gy = env.goal_position
-    prev_dist = np.sqrt((env.state.x - gx) ** 2 + (env.state.y - gy) ** 2)
+    prev_progress = env.current_progress
     _, reward, _, _ = env.step(np.array([0.0, 2.0]))
-    new_dist = np.sqrt((env.state.x - gx) ** 2 + (env.state.y - gy) ** 2)
-    expected_shaping = np.float64(0.5) * (prev_dist - new_dist) / env.track.track_width
-    # Base on-track reward is 0.1; no lap bonus for a single gentle step
+    new_progress = env.current_progress
+    progress_diff = new_progress - prev_progress
+    expected_shaping = np.float64(0.5) * progress_diff
     expected_reward = np.float64(0.1) + expected_shaping
     np.testing.assert_almost_equal(reward, expected_reward, decimal=12)
 
@@ -397,55 +396,55 @@ def test_stationary_action_at_goal_gives_base_reward():
     assert reward == np.float64(0.1), f"Expected 0.1 (no shaping), got {reward}"
 
 
-def test_moving_away_from_goal_gives_lower_reward():
+def test_moving_forward_gives_higher_reward():
     env = RacingEnv(randomize_start=False)
     env.reset(seed=42)
     _, r_zero, _, _ = env.step(np.array([0.0, 0.0]))
     env.reset(seed=42)
-    _, r_away, _, _ = env.step(np.array([0.0, 2.0]))
-    assert r_away < r_zero, (
-        f"Expected reward when moving away ({r_away}) "
-        f"to be lower than stationary ({r_zero})"
+    _, r_forward, _, _ = env.step(np.array([0.0, 2.0]))
+    assert r_forward > r_zero, (
+        f"Expected reward when moving forward ({r_forward}) "
+        f"to be higher than stationary ({r_zero})"
     )
 
 
-def test_higher_reward_when_moving_toward_goal_from_far():
+def test_progress_shaping_rewards_forward_movement():
     env = RacingEnv()
     env.reset(seed=42)
-    _, r_still_at_goal, _, _ = env.step(np.array([0.0, 0.0]))
+    _, r_still, _, _ = env.step(np.array([0.0, 0.0]))
     env.reset(seed=42)
-    env.state = CarState(x=4.0, y=-4.0, heading=np.pi, velocity=2.0)
-    _, r_toward_from_far, _, _ = env.step(np.array([0.0, 2.0]))
-    assert r_toward_from_far > r_still_at_goal, (
-        f"Expected reward when moving toward goal from far ({r_toward_from_far}) "
-        f"to be higher than stationary at goal ({r_still_at_goal})"
+    env.state = CarState(x=2.0, y=-4.0, heading=0.0, velocity=1.0)
+    env.current_progress = env.track.progress_along_centerline(2.0, -4.0)
+    _, r_forward, _, _ = env.step(np.array([0.0, 2.0]))
+    assert r_forward > r_still, (
+        f"Expected reward when moving forward ({r_forward}) "
+        f"to be higher than stationary ({r_still})"
     )
 
 
-def test_toward_goal_higher_than_away_same_position():
+def test_forward_higher_than_backward_same_position():
     env = RacingEnv()
     env.reset(seed=42)
-    gx, gy = env.goal_position
-    env.state = CarState(x=3.0, y=-4.0, heading=np.pi, velocity=1.0)
-    prev_dist = np.sqrt((env.state.x - gx) ** 2 + (env.state.y - gy) ** 2)
-    _, r_toward, _, _ = env.step(np.array([0.0, 2.0]))
-    new_dist_toward = np.sqrt((env.state.x - gx) ** 2 + (env.state.y - gy) ** 2)
+    env.state = CarState(x=2.0, y=-4.0, heading=0.0, velocity=1.0)
+    env.current_progress = env.track.progress_along_centerline(2.0, -4.0)
+    _, r_forward, _, _ = env.step(np.array([0.0, 2.0]))
     env.reset(seed=42)
-    env.state = CarState(x=3.0, y=-4.0, heading=0.0, velocity=1.0)
-    _, r_away, _, _ = env.step(np.array([0.0, 2.0]))
-    assert r_toward > r_away, (
-        f"Expected toward-goal reward ({r_toward}) > away-from-goal reward ({r_away}). "
-        f"Toward delta={prev_dist - new_dist_toward:.4f}"
+    env.state = CarState(x=2.0, y=-4.0, heading=np.pi, velocity=1.0)
+    env.current_progress = env.track.progress_along_centerline(2.0, -4.0)
+    _, r_backward, _, _ = env.step(np.array([0.0, 2.0]))
+    assert r_forward > r_backward, (
+        f"Expected forward reward ({r_forward}) > backward reward ({r_backward})"
     )
 
 
-def test_goal_distance_shaping_magnitude_reasonable():
+def test_progress_shaping_magnitude_reasonable():
     env = RacingEnv()
     env.reset(seed=42)
-    env.state = CarState(x=5.0, y=-4.0, heading=np.pi, velocity=5.0)
+    env.state = CarState(x=2.0, y=-4.0, heading=0.0, velocity=5.0)
+    env.current_progress = env.track.progress_along_centerline(2.0, -4.0)
     _, reward, _, _ = env.step(np.array([0.0, 5.0]))
-    # Shaping bound: max speed * dt = 10 * 0.1 = 1.0 distance per step
-    # max positive shaping = 0.5 * 1.0 / 2.0 = 0.25
+    # Max progress per step at full speed: max_speed * dt / perimeter = 10 * 0.1 / 36 ≈ 0.028
+    # max positive shaping = 0.5 * 0.028 ≈ 0.014
     # on-track bonus = 0.1, so reward < 1.0 (lap bonus threshold)
     assert reward < 1.0, (
         f"Reward {reward} should not dominate existing components; "
