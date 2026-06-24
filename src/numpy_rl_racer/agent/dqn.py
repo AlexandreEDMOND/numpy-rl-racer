@@ -144,7 +144,7 @@ class DQNAgent:
                  buffer_size=10000, batch_size=64, target_update_freq=100,
                  use_double_dqn=True, use_per=False, alpha=0.6, beta0=0.4,
                  beta_anneal_steps=100000, tau=0.0, seed=None,
-                 use_dueling_dqn=False):
+                 use_dueling_dqn=False, n_step=1):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
         self.rng = np.random.RandomState(seed) if seed is not None else None
@@ -164,6 +164,9 @@ class DQNAgent:
         else:
             self.replay_buffer = ReplayBuffer(buffer_size, rng=self.rng)
         self.gamma = gamma
+        self.gamma_n = gamma ** n_step
+        self.n_step = n_step
+        self._n_step_buffer = []
         self.epsilon = epsilon
         self.epsilon_min = epsilon_min
         self.epsilon_decay = epsilon_decay
@@ -209,7 +212,29 @@ class DQNAgent:
         return int(np.argmax(q_values))
 
     def train_step(self, state, action, reward, next_state, done):
-        self.replay_buffer.push(state, action, reward, next_state, done)
+        self._n_step_buffer.append((state, action, reward, next_state, done))
+
+        if len(self._n_step_buffer) < self.n_step and not done:
+            return 0.0
+
+        n_state, n_action = self._n_step_buffer[0][0], self._n_step_buffer[0][1]
+        G = 0.0
+        n_next_state = next_state
+        n_done = False
+        for i in range(min(self.n_step, len(self._n_step_buffer))):
+            _, _, r, ns, d = self._n_step_buffer[i]
+            G += (self.gamma ** i) * r
+            n_next_state = ns
+            n_done = d
+            if d:
+                break
+
+        self.replay_buffer.push(n_state, n_action, G, n_next_state, n_done)
+        self._n_step_buffer.pop(0)
+
+        if done:
+            self._n_step_buffer.clear()
+
         if len(self.replay_buffer) < self.batch_size:
             return 0.0
 
@@ -226,7 +251,7 @@ class DQNAgent:
             max_next_q = next_q_target[np.arange(self.batch_size), best_actions]
         else:
             max_next_q = np.max(next_q_target, axis=1)
-        target_q = rewards + self.gamma * max_next_q * (1.0 - dones)
+        target_q = rewards + self.gamma_n * max_next_q * (1.0 - dones)
 
         current_q = self.online_net.forward(states)
         self._last_avg_q = float(np.mean(np.max(current_q, axis=1)))
