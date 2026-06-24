@@ -2,6 +2,8 @@ import numpy as np
 from matplotlib.path import Path
 import matplotlib.patches as mpatches
 
+from numpy_rl_racer.env.racing_env import Figure8Track
+
 
 class MatplotlibRenderer:
     def __init__(self, track, figsize=(8, 6), headless=False):
@@ -24,7 +26,9 @@ class MatplotlibRenderer:
         self._recording_frames = []
 
     def _compute_boundary_lines(self):
-        if hasattr(self.track, 'radius'):
+        if isinstance(self.track, Figure8Track):
+            self._compute_figure8_boundaries()
+        elif hasattr(self.track, 'radius'):
             R = float(self.track.radius)
             tw2 = float(self.track.track_width) / 2.0
             theta = np.linspace(0, 2 * np.pi, 200)
@@ -55,6 +59,19 @@ class MatplotlibRenderer:
                 [-hw + tw2, -hh + tw2],
             ])
 
+    def _compute_figure8_boundaries(self):
+        R = float(self.track.radius)
+        tw2 = float(self.track.track_width) / 2.0
+        n = 400
+        theta = np.linspace(0, 2 * np.pi, n, endpoint=True)
+        cx = R * np.cos(theta)
+        cy = R * np.sin(theta) * np.cos(theta)
+        norm = np.sqrt(np.sin(theta) ** 2 + np.cos(2.0 * theta) ** 2)
+        nx = -np.cos(2.0 * theta) / norm
+        ny = -np.sin(theta) / norm
+        self._outer_boundary = np.column_stack([cx + tw2 * nx, cy + tw2 * ny])
+        self._inner_boundary = np.column_stack([cx - tw2 * nx, cy - tw2 * ny])
+
     def _draw_boundary_lines(self):
         self.ax.plot(self._outer_boundary[:, 0], self._outer_boundary[:, 1],
                       color="#666666", linewidth=0.8, zorder=2)
@@ -62,7 +79,9 @@ class MatplotlibRenderer:
                       color="#666666", linewidth=0.8, zorder=2)
 
     def _draw_background(self):
-        if hasattr(self.track, 'radius'):
+        if isinstance(self.track, Figure8Track):
+            self._draw_figure8_background()
+        elif hasattr(self.track, 'radius'):
             self._draw_circular_background()
         else:
             self._draw_rectangular_background()
@@ -116,6 +135,45 @@ class MatplotlibRenderer:
         self.ax.add_patch(
             mpatches.Circle((0, 0), R, fill=False, linestyle="--", color="#aaaaaa", linewidth=0.5)
         )
+
+        margin = tw
+        self.ax.set_xlim(-R - margin, R + margin)
+        self.ax.set_ylim(-R - margin, R + margin)
+        self.ax.grid(True, alpha=0.3)
+        self.ax.set_title("numpy-rl-racer")
+
+    def _draw_figure8_background(self):
+        R = float(self.track.radius)
+        tw = float(self.track.track_width)
+        tw2 = tw / 2.0
+        n = 400
+
+        theta = np.linspace(0, 2 * np.pi, n, endpoint=True)
+        cx = R * np.cos(theta)
+        cy = R * np.sin(theta) * np.cos(theta)
+        norm = np.sqrt(np.sin(theta) ** 2 + np.cos(2.0 * theta) ** 2)
+        nx = -np.cos(2.0 * theta) / norm
+        ny = -np.sin(theta) / norm
+
+        outer = np.column_stack([cx + tw2 * nx, cy + tw2 * ny])
+        inner = np.column_stack([cx - tw2 * nx, cy - tw2 * ny])
+
+        path = Path(
+            np.vstack([outer, inner[::-1], outer[:1]]),
+            [Path.MOVETO] + [Path.LINETO] * (n - 1)
+            + [Path.MOVETO] + [Path.LINETO] * (n - 1)
+            + [Path.CLOSEPOLY],
+        )
+        self.ax.add_patch(
+            mpatches.PathPatch(path, facecolor="#dddddd", edgecolor="#888888", linewidth=1)
+        )
+
+        cx_center = R * np.cos(np.linspace(0, 2 * np.pi, 200))
+        cy_center = R * np.sin(np.linspace(0, 2 * np.pi, 200)) * np.cos(np.linspace(0, 2 * np.pi, 200))
+        self.ax.plot(cx_center, cy_center, "--", color="#aaaaaa", linewidth=0.5, zorder=1)
+
+        gx, gy = self.track.goal_position
+        self.ax.plot(gx, gy, "o", color="#1a7c1a", markersize=8, zorder=1)
 
         margin = tw
         self.ax.set_xlim(-R - margin, R + margin)
