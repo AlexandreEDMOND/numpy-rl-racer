@@ -83,7 +83,7 @@ uv run python scripts/demo_render_env.py
 
 ## Training Results
 
-The DQN agent was trained for 300 episodes on the default rectangular track. The training curve below shows the episode reward and average loss.
+The DQN agent was trained for 100 episodes on the default rectangular track. The training curve below shows the episode reward and average loss.
 
 ![Training curve](images/training_curve.png)
 
@@ -92,6 +92,10 @@ After training, the greedy policy was evaluated for 3 episodes. Below are the fi
 | Episode 1 | Episode 2 | Episode 3 |
 |:---------:|:---------:|:---------:|
 | ![eval 1](images/eval_ep1_final.png) | ![eval 2](images/eval_ep2_final.png) | ![eval 3](images/eval_ep3_final.png) |
+
+The side-by-side animation below contrasts the **trained DQN policy** (left) with a **random policy** (right) on the same track starting from the same position. The trained agent consistently stays on track and completes laps, while the random agent drives off the track within a few steps.
+
+![Trained vs Random policy comparison](images/trained_vs_random.gif)
 
 ## Project constraints
 
@@ -123,6 +127,8 @@ Forbidden ML/RL dependencies:
 
 **Near term:**
 - [ ] **Procedural track generation** — Randomised track shapes using splines or bezier curves for greater variety
+- [ ] **Side-by-side policy comparison** — `scripts/compare_policies.py` records a GIF contrasting trained vs random policies; could be extended to compare algorithms, seeds, or checkpoints
+- [ ] **Higher-quality GIF rendering** — Increase resolution, add legends, speed overlay, and episode info to comparison animations
 - [ ] **Ray-casting lidar sensors** — Replace hand-crafted observations with configurable ray-based distance sensors
 - [ ] **Continuous action space** — Support for continuous steering & acceleration via policy gradient methods
 - [ ] **Frame skipping & action repeat** — Improve training speed and temporal consistency
