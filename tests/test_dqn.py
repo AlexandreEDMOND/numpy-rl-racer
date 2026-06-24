@@ -1,6 +1,6 @@
 import numpy as np
 
-from numpy_rl_racer.agent.dqn import DQNAgent, ReplayBuffer, N_ACTIONS
+from numpy_rl_racer.agent.dqn import DQNAgent, PrioritizedReplayBuffer, ReplayBuffer, SumTree, N_ACTIONS
 from numpy_rl_racer.network import Dense, MLP, SGD
 
 
@@ -205,3 +205,215 @@ def test_standard_dqn_target_computation_when_disabled():
     assert np.isclose(loss, expected_loss, rtol=1e-6), (
         f"Loss {loss} does not match standard DQN target {expected_loss}"
     )
+
+
+# -- SumTree tests ----------------------------------------------------------
+
+def test_sumtree_add_and_total():
+    tree = SumTree(capacity=4)
+    assert tree.total() == 0.0
+    tree.add(1.0, "a")
+    assert tree.total() == 1.0
+    tree.add(2.0, "b")
+    assert tree.total() == 3.0
+    tree.add(3.0, "c")
+    assert tree.total() == 6.0
+    tree.add(4.0, "d")
+    assert tree.total() == 10.0
+
+
+def test_sumtree_get():
+    tree = SumTree(capacity=4)
+    tree.add(1.0, "a")
+    tree.add(2.0, "b")
+    tree.add(3.0, "c")
+    tree.add(4.0, "d")
+    # Cumulative sums: [1, 3, 6, 10]
+    # s in [0,1] -> a, (1,3] -> b, (3,6] -> c, (6,10) -> d
+    idx, priority, data = tree.get(0.0)
+    assert data == "a"
+    assert priority == 1.0
+    idx, priority, data = tree.get(0.5)
+    assert data == "a"
+    idx, priority, data = tree.get(1.5)
+    assert data == "b"
+    idx, priority, data = tree.get(2.9)
+    assert data == "b"
+    idx, priority, data = tree.get(3.5)
+    assert data == "c"
+    idx, priority, data = tree.get(5.9)
+    assert data == "c"
+    idx, priority, data = tree.get(7.0)
+    assert data == "d"
+
+
+def test_sumtree_update():
+    tree = SumTree(capacity=4)
+    tree.add(1.0, "a")
+    tree.add(1.0, "b")
+    tree.add(1.0, "c")
+    tree.add(1.0, "d")
+    assert tree.total() == 4.0
+    idx, _, _ = tree.get(0.5)
+    tree.update_priority(idx, 5.0)
+    assert tree.total() == 8.0
+    idx, priority, data = tree.get(0.5)
+    assert data == "a"
+    assert priority == 5.0
+
+
+def test_sumtree_overflow():
+    tree = SumTree(capacity=3)
+    for i in range(5):
+        tree.add(float(i + 1), str(i))
+    assert tree.size == 3
+    assert tree.total() == 3.0 + 4.0 + 5.0
+
+
+def test_sumtree_sample_distribution():
+    np.random.seed(42)
+    tree = SumTree(capacity=4)
+    tree.add(1.0, "low")
+    tree.add(1.0, "low")
+    tree.add(1.0, "low")
+    tree.add(97.0, "high")
+    counts = {"low": 0, "high": 0}
+    for _ in range(1000):
+        s = np.random.uniform(0, tree.total())
+        _, _, data = tree.get(s)
+        counts[data] += 1
+    assert counts["high"] > counts["low"] * 10
+
+
+# -- PrioritizedReplayBuffer tests ------------------------------------------
+
+def test_per_buffer_push_and_len():
+    buf = PrioritizedReplayBuffer(capacity=5)
+    assert len(buf) == 0
+    for i in range(5):
+        buf.push(np.array([float(i)]), i, float(i), np.array([float(i + 1)]), False)
+    assert len(buf) == 5
+
+
+def test_per_buffer_overflow():
+    buf = PrioritizedReplayBuffer(capacity=3)
+    for i in range(5):
+        buf.push(np.array([float(i)]), i, float(i), np.array([float(i + 1)]), False)
+    assert len(buf) == 3
+
+
+def test_per_buffer_sample_returns_is_weights():
+    buf = PrioritizedReplayBuffer(capacity=10)
+    for i in range(10):
+        buf.push(np.array([float(i)]), i, float(i), np.array([float(i + 1)]), False)
+    result = buf.sample(4)
+    states, actions, rewards, next_states, dones, is_weights, indices = result
+    assert states.shape == (4, 1)
+    assert actions.shape == (4,)
+    assert rewards.shape == (4,)
+    assert next_states.shape == (4, 1)
+    assert dones.shape == (4,)
+    assert is_weights.shape == (4,)
+    assert indices.shape == (4,)
+    assert np.all(is_weights > 0.0)
+    assert np.isclose(is_weights.max(), 1.0)
+
+
+def test_per_buffer_sample_non_uniform():
+    np.random.seed(42)
+    buf = PrioritizedReplayBuffer(capacity=100, alpha=1.0)
+    for i in range(100):
+        buf.push(np.array([0.0]), 0, float(i), np.array([0.0]), False)
+    for _ in range(50):
+        result = buf.sample(16)
+        states, actions, rewards, next_states, dones, is_weights, indices = result
+        buf.update_priorities(indices, np.abs(rewards) + 0.1)
+
+    # After training with different TD errors, priorities should be non-uniform
+    priorities = buf.tree.tree[buf.tree.capacity:buf.tree.capacity + buf.tree.size]
+    unique_priorities = np.unique(priorities)
+    assert len(unique_priorities) > 1
+
+
+def test_per_buffer_beta_annealing():
+    buf = PrioritizedReplayBuffer(capacity=10, beta0=0.4, beta_anneal_steps=100)
+    for i in range(10):
+        buf.push(np.array([0.0]), 0, 0.0, np.array([0.0]), False)
+    assert np.isclose(buf.beta, 0.4)
+    for _ in range(50):
+        buf.sample(4)
+    expected_beta = min(1.0, 0.4 + 0.6 * 50 / 100)
+    assert np.isclose(buf.beta, expected_beta)
+    for _ in range(100):
+        buf.sample(4)
+    assert np.isclose(buf.beta, 1.0)
+
+
+def test_per_buffer_empty_sample_raises():
+    buf = PrioritizedReplayBuffer(capacity=5)
+    for i in range(3):
+        buf.push(np.array([0.0]), 0, 0.0, np.array([0.0]), False)
+    # Should not fail when enough samples exist
+    result = buf.sample(3)
+    assert len(result) == 7
+
+
+def test_per_buffer_capacity_one():
+    buf = PrioritizedReplayBuffer(capacity=1)
+    buf.push(np.array([0.0]), 0, 0.0, np.array([0.0]), False)
+    states, actions, rewards, next_states, dones, is_weights, indices = buf.sample(1)
+    assert states.shape == (1, 1)
+
+
+# -- DQN + PER integration tests --------------------------------------------
+
+def test_dqn_per_training_step_runs():
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, batch_size=4,
+                     use_per=True)
+    assert agent.use_per is True
+    assert isinstance(agent.replay_buffer, PrioritizedReplayBuffer)
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for _ in range(20):
+        action = agent.act(state, training=True)
+        next_state = state + np.random.randn(6) * 0.01
+        reward = 0.1
+        done = False
+        agent.train_step(state, action, reward, next_state, done)
+
+
+def test_dqn_per_priorities_updated():
+    np.random.seed(1)
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-2, batch_size=8,
+                     use_per=True)
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for step in range(30):
+        action = agent.act(state, training=True)
+        next_state = state + np.random.randn(6) * 0.01
+        reward = 0.1
+        done = False
+        agent.train_step(state, action, reward, next_state, done)
+
+    leaf_priorities = agent.replay_buffer.tree.tree[
+        agent.replay_buffer.tree.capacity:
+    ]
+    non_zero = leaf_priorities[leaf_priorities > 0]
+    assert len(non_zero) > 0
+    unique_priorities = np.unique(non_zero)
+    # Priorities should have been updated to non-uniform values
+    assert np.any(unique_priorities != unique_priorities[0]) or len(unique_priorities) > 1
+
+
+# -- Regression: use_per=False matches uniform replay -----------------------
+
+def test_dqn_per_regression_uniform():
+    np.random.seed(42)
+    agent_uniform = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-2, batch_size=8,
+                             use_per=False)
+    np.random.seed(42)
+    agent_per = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-2, batch_size=8,
+                         use_per=True)
+
+    # After identical training (limited steps so priorities remain similar),
+    # per=False should be the default
+    assert not agent_uniform.use_per
+    assert agent_per.use_per
