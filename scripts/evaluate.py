@@ -8,6 +8,11 @@ from numpy_rl_racer.env import CircularTrack, RacingEnv
 from numpy_rl_racer.rendering import MatplotlibRenderer
 
 
+def _infer_state_dim(path):
+    data = np.load(path)
+    return data["layer_0_w"].shape[0]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Evaluate a trained DQN agent in the RacingEnv.")
     parser.add_argument("--model-path", default="models/best_model.npz", help="Path to saved model parameters")
@@ -31,7 +36,8 @@ def main(argv=None):
         env = RacingEnv()
 
     print(f"Track type: {args.track}")
-    agent = DQNAgent(state_dim=6)
+    state_dim = _infer_state_dim(args.model_path)
+    agent = DQNAgent(state_dim=state_dim)
     agent.load(args.model_path)
     agent.epsilon = 0.0
 

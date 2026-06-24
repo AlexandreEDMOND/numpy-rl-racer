@@ -70,45 +70,76 @@ def test_log_dir_nested_path_parsing():
     assert os.path.normpath(result) == "a/b/c"
 
 
-def test_evaluate_headless(tmp_path):
+def _make_mock_model(weights_dir, state_dim=6):
+    hidden_sizes = [64, 64]
+    n_actions = 5
+    params = {
+        "layer_0_w": np.random.randn(state_dim, hidden_sizes[0]).astype(np.float64),
+        "layer_0_b": np.random.randn(hidden_sizes[0]).astype(np.float64),
+        "layer_1_w": np.random.randn(hidden_sizes[0], hidden_sizes[1]).astype(np.float64),
+        "layer_1_b": np.random.randn(hidden_sizes[1]).astype(np.float64),
+        "layer_2_w": np.random.randn(hidden_sizes[1], n_actions).astype(np.float64),
+        "layer_2_b": np.random.randn(n_actions).astype(np.float64),
+    }
+    path = os.path.join(weights_dir, f"mock_model_{state_dim}d.npz")
+    np.savez(path, **params)
+    return path
+
+
+def _run_evaluate_main(tmp_path, extra_args=None):
     scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
     orig_path = sys.path.copy()
     sys.path.insert(0, scripts_dir)
     try:
         from evaluate import main
+        model_path = _make_mock_model(tmp_path, state_dim=6)
+        args = [
+            "--headless",
+            "--model-path", model_path,
+            "--episodes", "1",
+            "--max-steps", "3",
+            "--save-dir", str(tmp_path),
+        ]
+        if extra_args:
+            args.extend(extra_args)
         with patch("numpy_rl_racer.agent.dqn.DQNAgent.load"):
-            main([
-                "--headless",
-                "--episodes", "1",
-                "--max-steps", "3",
-                "--save-dir", str(tmp_path),
-            ])
+            main(args)
     finally:
         sys.path[:] = orig_path
+
+
+def test_evaluate_headless(tmp_path):
+    _run_evaluate_main(tmp_path)
     saved = list(tmp_path.glob("eval_ep*_final.png"))
     assert len(saved) == 1
     assert saved[0].stat().st_size > 0
 
 
 def test_evaluate_gif_flag(tmp_path):
-    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
-    orig_path = sys.path.copy()
-    sys.path.insert(0, scripts_dir)
-    try:
-        from evaluate import main
-        with patch("numpy_rl_racer.agent.dqn.DQNAgent.load"):
-            main([
-                "--headless",
-                "--episodes", "1",
-                "--max-steps", "3",
-                "--save-dir", str(tmp_path),
-                "--gif",
-            ])
-    finally:
-        sys.path[:] = orig_path
+    _run_evaluate_main(tmp_path, ["--gif"])
     gifs = list(tmp_path.glob("eval_ep*.gif"))
     assert len(gifs) == 1
     assert gifs[0].stat().st_size > 0
+
+
+def test_evaluate_mock_6dim(tmp_path):
+    model_path = _make_mock_model(tmp_path, state_dim=6)
+    data = np.load(model_path)
+    assert data["layer_0_w"].shape[0] == 6
+
+
+def test_evaluate_mock_8dim(tmp_path):
+    model_path = _make_mock_model(tmp_path, state_dim=8)
+    data = np.load(model_path)
+    assert data["layer_0_w"].shape[0] == 8
+
+
+def test_infer_state_dim_detection(tmp_path):
+    path_6 = _make_mock_model(tmp_path, state_dim=6)
+    path_8 = _make_mock_model(tmp_path, state_dim=8)
+    from evaluate import _infer_state_dim
+    assert _infer_state_dim(path_6) == 6
+    assert _infer_state_dim(path_8) == 8
 
 
 def _make_main():
