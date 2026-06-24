@@ -19,6 +19,24 @@ class RectangularTrack:
     def start_position(self):
         return (np.float64(0.0), -self.half_h, np.float64(0.0))
 
+    def sample_centerline_point(self):
+        hw, hh = self.half_w, self.half_h
+        r = np.random.uniform(0.0, self._perimeter)
+        cum = np.float64(0.0)
+        for x1, y1, x2, y2 in _centerline_edges(hw, hh):
+            sx = x2 - x1
+            sy = y2 - y1
+            seg_len = np.sqrt(sx * sx + sy * sy)
+            cum_next = cum + seg_len
+            if r <= cum_next:
+                t = np.float64(0.0) if seg_len == 0.0 else (r - cum) / seg_len
+                cx = x1 + t * sx
+                cy = y1 + t * sy
+                angle = np.arctan2(sy, sx)
+                return (cx, cy, angle)
+            cum = cum_next
+        return self.start_position
+
     def progress_along_centerline(self, x, y):
         px, py = np.float64(x), np.float64(y)
         hw, hh = self.half_w, self.half_h
@@ -110,6 +128,12 @@ class CircularTrack:
     def start_position(self):
         return (np.float64(0.0), -self.radius, np.float64(0.0))
 
+    def sample_centerline_point(self):
+        theta = np.random.uniform(0.0, 2.0 * np.pi)
+        x = self.radius * np.sin(theta)
+        y = -self.radius * np.cos(theta)
+        return (x, y, theta)
+
     def progress_along_centerline(self, x, y):
         px, py = np.float64(x), np.float64(y)
         angle = np.arctan2(px, -py)
@@ -132,11 +156,12 @@ class CircularTrack:
 
 
 class RacingEnv:
-    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None):
+    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None, randomize_start=True):
         if track is not None:
             self.track = track
         else:
             self.track = RectangularTrack(track_width, track_height, track_road_width)
+        self.randomize_start = randomize_start
         self.car = KinematicCar()
         self.dt = np.float64(dt)
         self.state = None
@@ -148,12 +173,24 @@ class RacingEnv:
     def goal_position(self):
         return self.track.goal_position
 
-    def reset(self, seed=None):
+    def reset(self, seed=None, randomize_start=None):
         if seed is not None:
             np.random.seed(seed)
-        sx, sy, sheading = self.track.start_position
+        if randomize_start is None:
+            randomize_start = self.randomize_start
+        if randomize_start:
+            cx, cy, tangent = self.track.sample_centerline_point()
+            max_lateral = np.float64(0.2) * self.track.track_width
+            lateral = np.random.uniform(-max_lateral, max_lateral)
+            perp_angle = tangent + np.pi / np.float64(2.0)
+            sx = cx + lateral * np.cos(perp_angle)
+            sy = cy + lateral * np.sin(perp_angle)
+            sheading = tangent
+            self.current_progress = self.track.progress_along_centerline(sx, sy)
+        else:
+            sx, sy, sheading = self.track.start_position
+            self.current_progress = np.float64(0.0)
         self.state = CarState(x=sx, y=sy, heading=sheading, velocity=0.0)
-        self.current_progress = np.float64(0.0)
         self.prev_progress = np.float64(0.0)
         self.lap_count = 0
         return self._get_observation()

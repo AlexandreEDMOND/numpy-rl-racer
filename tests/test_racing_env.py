@@ -70,7 +70,7 @@ def test_goal_position():
 
 
 def test_progress_starts_at_zero():
-    env = RacingEnv()
+    env = RacingEnv(randomize_start=False)
     env.reset(seed=42)
     assert env.current_progress == np.float64(0.0)
     assert env.lap_count == 0
@@ -108,7 +108,7 @@ def test_progress_computation_known_points():
 
 
 def test_lap_completion_gives_bonus_reward():
-    env = RacingEnv(dt=0.1)
+    env = RacingEnv(dt=0.1, randomize_start=False)
     env.reset(seed=0)
     total_reward = 0.0
     # Drive at full speed with slight steering to loop around
@@ -203,7 +203,7 @@ def test_circular_track_half_properties():
 
 def test_racing_env_with_circular_track_reset():
     track = CircularTrack(radius=6.0, track_width=2.0)
-    env = RacingEnv(track=track)
+    env = RacingEnv(track=track, randomize_start=False)
     obs = env.reset(seed=42)
     assert env.state.x == np.float64(0.0)
     assert env.state.y == np.float64(-6.0)
@@ -247,7 +247,7 @@ def test_stationary_action_at_goal_gives_base_reward():
 
 
 def test_moving_away_from_goal_gives_lower_reward():
-    env = RacingEnv()
+    env = RacingEnv(randomize_start=False)
     env.reset(seed=42)
     _, r_zero, _, _ = env.step(np.array([0.0, 0.0]))
     env.reset(seed=42)
@@ -367,3 +367,54 @@ def test_distance_to_edge_normalized_zero_at_boundary_circular():
     env.state = CarState(x=0.0, y=-7.0, heading=0.0, velocity=0.0)
     obs = env._get_observation()
     np.testing.assert_almost_equal(obs[4], 0.0)
+
+
+# ── Randomized start ─────────────────────────────────────────────────
+
+
+def test_randomized_start_preserves_original_when_disabled():
+    env = RacingEnv(randomize_start=False)
+    env.reset(seed=42)
+    sx, sy, sh = env.track.start_position
+    assert env.state.x == sx
+    assert env.state.y == sy
+    assert env.state.heading == sh
+
+
+def test_randomized_start_produces_variation():
+    env = RacingEnv(randomize_start=True)
+    positions = set()
+    for seed in range(20):
+        env.reset(seed=seed)
+        positions.add((float(env.state.x), float(env.state.y), float(env.state.heading)))
+    assert len(positions) >= 2, "Expected different start positions across seeds"
+
+
+def test_randomized_start_seed_determinism():
+    env = RacingEnv(randomize_start=True)
+    env.reset(seed=123)
+    x1, y1, h1 = env.state.x, env.state.y, env.state.heading
+    env.reset(seed=123)
+    x2, y2, h2 = env.state.x, env.state.y, env.state.heading
+    assert x1 == x2 and y1 == y2 and h1 == h2, (
+        f"Same seed should give same start, got ({x1},{y1},{h1}) vs ({x2},{y2},{h2})"
+    )
+
+
+def test_randomized_start_on_track():
+    env = RacingEnv(randomize_start=True)
+    for seed in range(50):
+        env.reset(seed=seed)
+        assert env.track.is_on_track(env.state.x, env.state.y), (
+            f"Start position ({env.state.x}, {env.state.y}) with seed {seed} is off track"
+        )
+
+
+def test_randomized_start_on_track_circular():
+    track = CircularTrack(radius=6.0, track_width=2.0)
+    env = RacingEnv(track=track, randomize_start=True)
+    for seed in range(50):
+        env.reset(seed=seed)
+        assert env.track.is_on_track(env.state.x, env.state.y), (
+            f"Start position ({env.state.x}, {env.state.y}) with seed {seed} is off track"
+        )
