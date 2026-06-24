@@ -794,6 +794,35 @@ def test_grid_search_plot(tmp_path):
     assert os.path.getsize(plot_path) > 0
 
 
+# ---------------------------------------------------------------------------
+# Compare policies script tests
+# ---------------------------------------------------------------------------
+
+def _make_agent_checkpoint(path, state_dim=6):
+    agent = DQNAgent(state_dim=state_dim, hidden_sizes=[16], seed=0)
+    agent.save(path)
+
+
+def test_compare_policies_generates_gif(tmp_path):
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from compare_policies import main
+        model_path = str(tmp_path / "test_model.npz")
+        _make_agent_checkpoint(model_path, state_dim=6)
+        main([
+            "--model-path", model_path,
+            "--max-steps", "3",
+            "--save-dir", str(tmp_path),
+        ])
+        gifs = list(tmp_path.glob("*.gif"))
+        assert len(gifs) >= 1
+        assert all(g.stat().st_size > 0 for g in gifs)
+    finally:
+        sys.path[:] = orig_path
+
+
 def test_grid_search_seed(tmp_path):
     gs_main = _make_grid_search()
     csv_a = str(tmp_path / "a.csv")
