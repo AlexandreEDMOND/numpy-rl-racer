@@ -111,18 +111,28 @@ class DuelingMLP:
 
 
 class SGD:
-    def __init__(self, mlp, lr=1e-3, scheduler=None, momentum=0.0):
+    def __init__(self, mlp, lr=1e-3, scheduler=None, momentum=0.0, max_grad_norm=None):
         self.mlp = mlp
         self.scheduler = scheduler
         self.lr = scheduler.lr if scheduler is not None else lr
         self.momentum = momentum
+        self.max_grad_norm = max_grad_norm
         self._velocities = None
 
     def step(self):
+        if self.max_grad_norm is not None:
+            total_norm_sq = 0.0
+            for layer in self.mlp.layers:
+                total_norm_sq += np.sum(layer.grad_w ** 2) + np.sum(layer.grad_b ** 2)
+            total_norm = np.sqrt(total_norm_sq)
+            scale = self.max_grad_norm / total_norm if total_norm > self.max_grad_norm else 1.0
+        else:
+            scale = 1.0
+
         if self.momentum == 0.0:
             for layer in self.mlp.layers:
-                layer.w -= self.lr * layer.grad_w
-                layer.b -= self.lr * layer.grad_b
+                layer.w -= self.lr * scale * layer.grad_w
+                layer.b -= self.lr * scale * layer.grad_b
         else:
             if self._velocities is None:
                 self._velocities = {}
@@ -133,8 +143,8 @@ class SGD:
                     }
             for layer in self.mlp.layers:
                 vel = self._velocities[layer]
-                vel["w"] = self.momentum * vel["w"] - self.lr * layer.grad_w
-                vel["b"] = self.momentum * vel["b"] - self.lr * layer.grad_b
+                vel["w"] = self.momentum * vel["w"] - self.lr * scale * layer.grad_w
+                vel["b"] = self.momentum * vel["b"] - self.lr * scale * layer.grad_b
                 layer.w += vel["w"]
                 layer.b += vel["b"]
         if self.scheduler is not None:

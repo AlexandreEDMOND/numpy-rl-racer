@@ -145,7 +145,7 @@ class DQNAgent:
                  use_double_dqn=True, use_per=False, alpha=0.6, beta0=0.4,
                  beta_anneal_steps=100000, tau=0.0, seed=None,
                  use_dueling_dqn=False, n_step=1, scheduler=None,
-                 momentum=0.0, weight_decay=0.0):
+                 momentum=0.0, weight_decay=0.0, max_grad_norm=None):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
         self.rng = np.random.RandomState(seed) if seed is not None else None
@@ -160,7 +160,7 @@ class DQNAgent:
         for layer in self.target_net.layers:
             layer.weight_decay = weight_decay
         self._hard_update_target()
-        self.optimizer = SGD(self.online_net, lr=lr, scheduler=scheduler, momentum=momentum)
+        self.optimizer = SGD(self.online_net, lr=lr, scheduler=scheduler, momentum=momentum, max_grad_norm=max_grad_norm)
         self.use_per = use_per
         if use_per:
             self.replay_buffer = PrioritizedReplayBuffer(buffer_size, alpha=alpha, beta0=beta0,
