@@ -41,7 +41,7 @@ def plot_training(episode_rewards, episode_losses, save_dir):
     print(f"Saved training curve to {path}")
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Train a DQN agent in the RacingEnv.")
     parser.add_argument("--episodes", type=int, default=500, help="Number of training episodes")
     parser.add_argument("--max-steps", type=int, default=200, help="Max steps per episode")
@@ -50,7 +50,24 @@ def main():
     parser.add_argument("--log-dir", default=None, help="Directory to save training log CSV")
     parser.add_argument("--track", choices=["rectangular", "circular"], default="rectangular",
                         help="Track type to use (default: rectangular)")
-    args = parser.parse_args()
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
+    parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
+    parser.add_argument("--hidden-sizes", type=int, nargs="+", default=[64, 64],
+                        help="Hidden layer sizes")
+    parser.add_argument("--buffer-size", type=int, default=10000, help="Replay buffer capacity")
+    parser.add_argument("--epsilon-start", type=float, default=1.0,
+                        help="Initial epsilon for exploration")
+    parser.add_argument("--epsilon-min", type=float, default=0.01, help="Minimum epsilon")
+    parser.add_argument("--epsilon-decay", type=float, default=0.995,
+                        help="Epsilon decay rate per step")
+    parser.add_argument("--target-update-freq", type=int, default=100,
+                        help="Target network update frequency (steps)")
+    parser.add_argument("--no-double-dqn", action="store_true",
+                        help="Disable Double DQN (enabled by default)")
+    parser.add_argument("--use-per", action="store_true",
+                        help="Enable Prioritized Experience Replay")
+    args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
 
@@ -61,7 +78,29 @@ def main():
         env = RacingEnv()
 
     print(f"Track type: {args.track}")
-    agent = DQNAgent(state_dim=6, seed=args.seed)
+    agent = DQNAgent(
+        state_dim=6,
+        hidden_sizes=args.hidden_sizes,
+        lr=args.lr,
+        gamma=args.gamma,
+        epsilon=args.epsilon_start,
+        epsilon_min=args.epsilon_min,
+        epsilon_decay=args.epsilon_decay,
+        buffer_size=args.buffer_size,
+        batch_size=args.batch_size,
+        target_update_freq=args.target_update_freq,
+        use_double_dqn=not args.no_double_dqn,
+        use_per=args.use_per,
+        seed=args.seed,
+    )
+
+    print(
+        f"Hyperparameters: lr={args.lr}, batch_size={args.batch_size}, gamma={args.gamma}, "
+        f"hidden_sizes={args.hidden_sizes}, buffer_size={args.buffer_size}, "
+        f"epsilon_start={args.epsilon_start}, epsilon_min={args.epsilon_min}, "
+        f"epsilon_decay={args.epsilon_decay}, target_update_freq={args.target_update_freq}, "
+        f"double_dqn={not args.no_double_dqn}, use_per={args.use_per}"
+    )
 
     logger = None
     if args.log_dir:
