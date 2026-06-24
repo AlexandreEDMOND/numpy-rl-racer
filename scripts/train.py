@@ -5,7 +5,7 @@ import os
 import numpy as np
 
 from numpy_rl_racer.agent import DQNAgent, ACTIONS
-from numpy_rl_racer.env import CircularTrack, RacingEnv
+from numpy_rl_racer.env import CircularTrack, Obstacle, RacingEnv, RectangularTrack
 from numpy_rl_racer.utils.scheduler import ExponentialDecay, StepDecay
 
 
@@ -20,6 +20,30 @@ def _load_config(config_path):
     if not isinstance(config, dict):
         raise ValueError(f"Config file must contain a JSON object, got {type(config).__name__}")
     return config
+
+
+def _generate_obstacles(track, num_obstacles, seed=None):
+    rng = np.random.RandomState(seed)
+    obstacles = []
+    if hasattr(track, 'radius'):
+        R = float(track.radius)
+        inner_r = R - track.track_width
+        for _ in range(num_obstacles):
+            angle = rng.uniform(0, 2 * np.pi)
+            dist = rng.uniform(0, inner_r * 0.85)
+            x = dist * np.cos(angle)
+            y = dist * np.sin(angle)
+            obstacles.append(Obstacle(x, y, rng.uniform(0.3, 0.5)))
+    else:
+        hw = float(track.half_w)
+        hh = float(track.half_h)
+        inner_hw = hw - track.track_width
+        inner_hh = hh - track.track_width
+        for _ in range(num_obstacles):
+            x = rng.uniform(-inner_hw * 0.85, inner_hw * 0.85)
+            y = rng.uniform(-inner_hh * 0.85, inner_hh * 0.85)
+            obstacles.append(Obstacle(x, y, rng.uniform(0.3, 0.5)))
+    return obstacles
 
 
 def plot_training(episode_rewards, episode_losses, save_dir,
@@ -110,6 +134,10 @@ def main(argv=None):
                         help="Disable randomized start position (default: enabled)")
     parser.add_argument("--time-penalty", type=float, default=0.0,
                         help="Time penalty per second of elapsed time (default: 0.0)")
+    parser.add_argument("--num-obstacles", type=int, default=0,
+                        help="Number of obstacles to place on the track (default: 0)")
+    parser.add_argument("--obstacle-seed", type=int, default=None,
+                        help="Seed for reproducible obstacle placement (default: None)")
 
     known_args, _ = parser.parse_known_args(argv)
     if known_args.config:
@@ -128,9 +156,16 @@ def main(argv=None):
 
     if args.track == "circular":
         track = CircularTrack(radius=6.0, track_width=2.0)
-        env = RacingEnv(track=track, randomize_start=args.randomize_start, time_penalty=args.time_penalty)
     else:
-        env = RacingEnv(randomize_start=args.randomize_start, time_penalty=args.time_penalty)
+        track = RectangularTrack(width=10.0, height=8.0, track_width=2.0)
+
+    obstacles = None
+    if args.num_obstacles > 0:
+        obstacles = _generate_obstacles(track, args.num_obstacles, args.obstacle_seed)
+        print(f"Generated {len(obstacles)} obstacles (seed={args.obstacle_seed})")
+
+    env = RacingEnv(track=track, randomize_start=args.randomize_start,
+                    time_penalty=args.time_penalty, obstacles=obstacles)
 
     print(f"Track type: {args.track}")
     scheduler = None
@@ -138,8 +173,9 @@ def main(argv=None):
         scheduler = ExponentialDecay(args.lr, args.lr_decay)
     elif args.lr_scheduler == "step":
         scheduler = StepDecay(args.lr, args.lr_decay, args.lr_drop_every)
+    state_dim = 8 if obstacles else 6
     agent = DQNAgent(
-        state_dim=6,
+        state_dim=state_dim,
         hidden_sizes=args.hidden_sizes,
         lr=args.lr,
         gamma=args.gamma,
