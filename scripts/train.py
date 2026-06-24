@@ -5,6 +5,7 @@ import numpy as np
 
 from numpy_rl_racer.agent import DQNAgent, ACTIONS
 from numpy_rl_racer.env import CircularTrack, RacingEnv
+from numpy_rl_racer.utils.scheduler import ExponentialDecay, StepDecay
 
 
 def plot_training(episode_rewards, episode_losses, save_dir):
@@ -71,6 +72,12 @@ def main(argv=None):
                         help="Enable Dueling DQN architecture")
     parser.add_argument("--n-step", type=int, default=1,
                         help="N-step returns for TD target (default: 1)")
+    parser.add_argument("--lr-scheduler", choices=["none", "exponential", "step"],
+                        default="none", help="Learning rate scheduler type (default: none)")
+    parser.add_argument("--lr-decay", type=float, default=0.99,
+                        help="Decay rate for exponential scheduler, drop factor for step scheduler (default: 0.99)")
+    parser.add_argument("--lr-drop-every", type=int, default=100,
+                        help="Steps between LR drops for step scheduler (default: 100)")
     args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -82,6 +89,11 @@ def main(argv=None):
         env = RacingEnv()
 
     print(f"Track type: {args.track}")
+    scheduler = None
+    if args.lr_scheduler == "exponential":
+        scheduler = ExponentialDecay(args.lr, args.lr_decay)
+    elif args.lr_scheduler == "step":
+        scheduler = StepDecay(args.lr, args.lr_decay, args.lr_drop_every)
     agent = DQNAgent(
         state_dim=6,
         hidden_sizes=args.hidden_sizes,
@@ -98,21 +110,28 @@ def main(argv=None):
         use_dueling_dqn=args.dueling_dqn,
         n_step=args.n_step,
         seed=args.seed,
+        scheduler=scheduler,
     )
 
+    scheduler_str = args.lr_scheduler if args.lr_scheduler != "none" else "none"
     print(
         f"Hyperparameters: lr={args.lr}, batch_size={args.batch_size}, gamma={args.gamma}, "
         f"hidden_sizes={args.hidden_sizes}, buffer_size={args.buffer_size}, "
         f"epsilon_start={args.epsilon_start}, epsilon_min={args.epsilon_min}, "
         f"epsilon_decay={args.epsilon_decay}, target_update_freq={args.target_update_freq}, "
         f"double_dqn={not args.no_double_dqn}, use_per={args.use_per}, "
-        f"dueling_dqn={args.dueling_dqn}, n_step={args.n_step}"
+        f"dueling_dqn={args.dueling_dqn}, n_step={args.n_step}, "
+        f"lr_scheduler={scheduler_str}"
     )
 
     logger = None
     if args.log_dir:
         from numpy_rl_racer.utils.logging import TrainingLogger
-        logger = TrainingLogger(os.path.join(args.log_dir, "training_log.csv"))
+        fieldnames = ["episode", "total_reward", "steps", "avg_loss", "epsilon", "avg_q_value"]
+        if args.lr_scheduler != "none":
+            fieldnames.append("lr")
+        logger = TrainingLogger(os.path.join(args.log_dir, "training_log.csv"),
+                                fieldnames=fieldnames)
 
     episode_rewards = []
     episode_losses = []
@@ -153,7 +172,7 @@ def main(argv=None):
         )
 
         if logger:
-            logger.log(
+            log_kwargs = dict(
                 episode=ep,
                 total_reward=ep_reward,
                 steps=step + 1,
@@ -161,6 +180,9 @@ def main(argv=None):
                 epsilon=agent.epsilon,
                 avg_q_value=avg_q,
             )
+            if args.lr_scheduler != "none":
+                log_kwargs["lr"] = agent.optimizer.lr
+            logger.log(**log_kwargs)
 
         if ep_reward > best_reward:
             best_reward = ep_reward

@@ -1,6 +1,7 @@
 import numpy as np
 
-from numpy_rl_racer.network import Dense, DuelingMLP, MLP, relu
+from numpy_rl_racer.network import Dense, DuelingMLP, MLP, SGD, relu
+from numpy_rl_racer.utils.scheduler import ExponentialDecay, LRScheduler, StepDecay
 
 
 def test_relu_positive():
@@ -158,3 +159,80 @@ def test_dueling_mlp_backward():
         assert layer.grad_b is not None, f"grad_b is None for {layer}"
         assert not np.allclose(layer.grad_w, 0), f"grad_w is all zeros for {layer}"
         assert not np.allclose(layer.grad_b, 0), f"grad_b is all zeros for {layer}"
+
+
+class TestExponentialDecay:
+    def test_step_multiplies_lr_by_decay_rate(self):
+        sched = ExponentialDecay(1.0, 0.5)
+        sched.step()
+        assert sched.lr == 0.5
+        sched.step()
+        assert sched.lr == 0.25
+
+    def test_multiple_steps(self):
+        sched = ExponentialDecay(1.0, 0.9)
+        for _ in range(10):
+            sched.step()
+        np.testing.assert_almost_equal(sched.lr, 0.9 ** 10)
+
+
+class TestStepDecay:
+    def test_drops_lr_at_correct_intervals(self):
+        sched = StepDecay(1.0, 0.5, 3)
+        for _ in range(2):
+            sched.step()
+        assert sched.lr == 1.0
+        sched.step()
+        assert sched.lr == 0.5
+        for _ in range(2):
+            sched.step()
+        assert sched.lr == 0.5
+        sched.step()
+        assert sched.lr == 0.25
+
+    def test_no_drop_before_first_interval(self):
+        sched = StepDecay(1.0, 0.1, 5)
+        for _ in range(4):
+            sched.step()
+        assert sched.lr == 1.0
+
+
+class TestSGDWithScheduler:
+    def test_sgd_with_scheduler_produces_decreasing_lr(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(2, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(2, 1))
+        sched = ExponentialDecay(0.1, 0.5)
+        opt = SGD(mlp, scheduler=sched)
+        opt.step()
+        first_lr = opt.lr
+        opt.step()
+        second_lr = opt.lr
+        assert second_lr < first_lr
+
+    def test_sgd_without_scheduler_leaves_lr_unchanged(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(2, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(2, 1))
+        opt = SGD(mlp, lr=0.01)
+        lr_before = opt.lr
+        opt.step()
+        assert opt.lr == lr_before
+
+    def test_sgd_scheduler_lr_takes_precedence(self):
+        sched = ExponentialDecay(0.5, 0.9)
+        mlp = MLP([2, 4, 1])
+        opt = SGD(mlp, lr=0.01, scheduler=sched)
+        assert opt.lr == 0.5
+
+
+class TestLRSchedulerBase:
+    def test_base_class_raises_not_implemented(self):
+        sched = LRScheduler(1.0)
+        try:
+            sched.step()
+            assert False, "Expected NotImplementedError"
+        except NotImplementedError:
+            pass

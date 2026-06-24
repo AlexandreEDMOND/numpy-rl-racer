@@ -108,11 +108,15 @@ class DuelingMLP:
 
 
 class SGD:
-    def __init__(self, mlp, lr=1e-3):
+    def __init__(self, mlp, lr=1e-3, scheduler=None):
         self.mlp = mlp
-        self.lr = lr
+        self.scheduler = scheduler
+        self.lr = scheduler.lr if scheduler is not None else lr
 
     def step(self):
         for layer in self.mlp.layers:
             layer.w -= self.lr * layer.grad_w
             layer.b -= self.lr * layer.grad_b
+        if self.scheduler is not None:
+            self.scheduler.step()
+            self.lr = self.scheduler.lr

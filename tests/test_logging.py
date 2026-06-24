@@ -100,6 +100,20 @@ def test_logger_close_idempotent(tmp_path):
     assert len(rows) == 2  # header + 1 data row
 
 
+def test_logger_lr_column_when_fieldnames_include_lr(tmp_path):
+    filepath = str(tmp_path / "log.csv")
+    fieldnames = ["episode", "avg_loss", "lr"]
+    logger = TrainingLogger(filepath, fieldnames=fieldnames)
+    logger.log(episode=1, avg_loss=0.5, lr=0.01)
+    logger.close()
+
+    with open(filepath) as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    assert len(rows) == 1
+    assert float(rows[0]["lr"]) == 0.01
+
+
 def test_logger_data_preserved_after_close(tmp_path):
     filepath = str(tmp_path / "log.csv")
     logger = TrainingLogger(filepath)
