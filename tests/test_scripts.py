@@ -1,8 +1,11 @@
 import argparse
 import csv
+import json
 import os
 import sys
 from unittest.mock import patch
+
+import pytest
 
 import numpy as np
 
@@ -340,3 +343,143 @@ def test_eval_training_curve_generated(tmp_path):
     curve_path = os.path.join(tmp_path, "training_curve.png")
     assert os.path.exists(curve_path)
     assert os.path.getsize(curve_path) > 0
+
+
+def test_config_file_not_found(tmp_path):
+    main = _make_main()
+    cfg = tmp_path / "nonexistent.json"
+    with pytest.raises(FileNotFoundError):
+        main([
+            "--config", str(cfg),
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+
+def test_config_malformed_json(tmp_path):
+    main = _make_main()
+    cfg = tmp_path / "bad.json"
+    cfg.write_text("{invalid json}")
+    with pytest.raises(json.JSONDecodeError):
+        main([
+            "--config", str(cfg),
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+
+def test_config_sets_defaults(tmp_path):
+    main = _make_main()
+    config_data = {"lr": 0.0005, "batch_size": 128, "gamma": 0.95}
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(config_data))
+
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--config", str(cfg),
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["lr"] == 0.0005
+    assert kwargs["batch_size"] == 128
+    assert kwargs["gamma"] == 0.95
+
+
+def test_config_cli_overrides(tmp_path):
+    main = _make_main()
+    config_data = {"lr": 0.0005, "batch_size": 128, "gamma": 0.95}
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(config_data))
+
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--config", str(cfg),
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--lr", "0.001",
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["lr"] == 0.001
+    assert kwargs["batch_size"] == 128
+    assert kwargs["gamma"] == 0.95
+
+
+def test_config_saved_to_save_dir(tmp_path):
+    main = _make_main()
+    config_data = {"lr": 0.0005}
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(config_data))
+
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--config", str(cfg),
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    saved = os.path.join(tmp_path, "config.json")
+    assert os.path.exists(saved)
+    with open(saved) as f:
+        saved_config = json.load(f)
+    assert saved_config["lr"] == 0.0005
+
+
+def test_config_not_required(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["lr"] == 1e-3
+    assert kwargs["batch_size"] == 64
+    assert kwargs["gamma"] == 0.99
