@@ -36,8 +36,20 @@ def main(argv=None):
         env = RacingEnv()
 
     print(f"Track type: {args.track}")
-    state_dim = _infer_state_dim(args.model_path)
-    agent = DQNAgent(state_dim=state_dim)
+    data = np.load(args.model_path)
+    if "arch_type" in data:
+        arch_type = int(data["arch_type"])
+        hidden_sizes = list(data["hidden_sizes"])
+        state_dim = int(data["state_dim"])
+        agent = DQNAgent(
+            state_dim=state_dim,
+            hidden_sizes=hidden_sizes,
+            use_dueling_dqn=(arch_type == 1),
+        )
+    else:
+        print("[WARNING] No architecture metadata in checkpoint — assuming MLP architecture.")
+        state_dim = data["layer_0_w"].shape[0]
+        agent = DQNAgent(state_dim=state_dim)
     agent.load(args.model_path)
     agent.epsilon = 0.0
 

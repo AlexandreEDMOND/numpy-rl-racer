@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 
 from numpy_rl_racer.network import DuelingMLP, MLP, SGD
@@ -148,6 +150,8 @@ class DQNAgent:
                  momentum=0.0, weight_decay=0.0, max_grad_norm=None):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
+        self.state_dim = state_dim
+        self.hidden_sizes = hidden_sizes
         self.rng = np.random.RandomState(seed) if seed is not None else None
         if use_dueling_dqn:
             self.online_net = DuelingMLP(state_dim, hidden_sizes, N_ACTIONS)
@@ -178,6 +182,7 @@ class DQNAgent:
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
         self.use_double_dqn = use_double_dqn
+        self.use_dueling_dqn = use_dueling_dqn
         self.tau = tau
         self._step_counter = 0
         self._last_avg_q = float("nan")
@@ -237,10 +242,48 @@ class DQNAgent:
                 params["buffer_next_states"] = np.array([t[3] for t in buf.buffer])
                 params["buffer_dones"] = np.array([t[4] for t in buf.buffer], dtype=bool)
                 params["buffer_pos"] = np.array(buf.pos)
+        params["arch_type"] = np.array(1 if self.use_dueling_dqn else 0)
+        params["hidden_sizes"] = np.array(self.hidden_sizes)
+        params["use_dueling_dqn"] = np.array(1 if self.use_dueling_dqn else 0)
+        params["state_dim"] = np.array(self.state_dim)
+        params["n_actions"] = np.array(N_ACTIONS)
         np.savez(path, **params)
 
     def load(self, path):
         data = np.load(path, allow_pickle=False)
+        has_metadata = "arch_type" in data
+        if has_metadata:
+            arch_type = int(data["arch_type"])
+            expected = 1 if self.use_dueling_dqn else 0
+            if arch_type != expected:
+                if arch_type == 1:
+                    raise ValueError(
+                        "Saved model uses dueling architecture but agent "
+                        "was constructed with use_dueling_dqn=False"
+                    )
+                else:
+                    raise ValueError(
+                        "Saved model uses MLP architecture but agent "
+                        "was constructed with use_dueling_dqn=True"
+                    )
+            saved_hidden = list(data["hidden_sizes"])
+            saved_state_dim = int(data["state_dim"])
+            if saved_hidden != self.hidden_sizes:
+                raise ValueError(
+                    f"Saved model hidden_sizes={saved_hidden} do not match "
+                    f"agent hidden_sizes={self.hidden_sizes}"
+                )
+            if saved_state_dim != self.state_dim:
+                raise ValueError(
+                    f"Saved model state_dim={saved_state_dim} does not match "
+                    f"agent state_dim={self.state_dim}"
+                )
+        else:
+            warnings.warn(
+                "Loaded checkpoint does not contain architecture metadata. "
+                "Proceeding with current agent configuration.",
+                stacklevel=2,
+            )
         for i, layer in enumerate(self.online_net.layers):
             key_w = f"layer_{i}_w"
             key_b = f"layer_{i}_b"

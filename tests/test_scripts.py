@@ -122,6 +122,27 @@ def test_evaluate_gif_flag(tmp_path):
     assert gifs[0].stat().st_size > 0
 
 
+def test_evaluate_with_dueling_model(tmp_path):
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from evaluate import main
+        agent = DQNAgent(state_dim=6, hidden_sizes=[16], use_dueling_dqn=True, seed=42)
+        model_path = str(tmp_path / "dueling_model.npz")
+        agent.save(model_path)
+        args = [
+            "--headless",
+            "--model-path", model_path,
+            "--episodes", "1",
+            "--max-steps", "3",
+            "--save-dir", str(tmp_path),
+        ]
+        main(args)
+    finally:
+        sys.path[:] = orig_path
+
+
 def test_evaluate_mock_6dim(tmp_path):
     model_path = _make_mock_model(tmp_path, state_dim=6)
     data = np.load(model_path)
