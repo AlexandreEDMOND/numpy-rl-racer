@@ -142,7 +142,12 @@ class MatplotlibRenderer:
             raise RuntimeError(
                 "No frames recorded. Call start_recording() and render() before save_animation()."
             )
-        from PIL import Image
+        try:
+            from PIL import Image
+        except ImportError:
+            raise ImportError(
+                "Pillow is required for GIF recording. Install it via: uv add pillow"
+            )
         duration = int(1000 / fps)
         frames = [Image.fromarray(frame) for frame in self._recording_frames]
         frames[0].save(
