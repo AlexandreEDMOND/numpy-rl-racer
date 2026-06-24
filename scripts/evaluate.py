@@ -18,6 +18,8 @@ def main(argv=None):
     parser.add_argument("--track", choices=["rectangular", "circular"], default="rectangular",
                         help="Track type to use (default: rectangular)")
     parser.add_argument("--headless", action="store_true", help="Run in headless mode (no GUI window)")
+    parser.add_argument("--gif", "--save-gif", action="store_true",
+                        help="Record and save GIF animation of each evaluation episode")
     args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -42,6 +44,9 @@ def main(argv=None):
         state = env.reset(seed=args.seed + ep)
         ep_reward = 0.0
 
+        if args.gif:
+            renderer.start_recording()
+
         for step in range(args.max_steps):
             action_idx = agent.act(state, training=False)
             next_state, reward, done, _ = env.step(ACTIONS[action_idx])
@@ -59,6 +64,12 @@ def main(argv=None):
         fig_path = os.path.join(args.save_dir, f"eval_ep{ep}_final.png")
         renderer.fig.savefig(fig_path, dpi=150)
         print(f"  Saved {fig_path}")
+
+        if args.gif:
+            gif_path = os.path.join(args.save_dir, f"eval_ep{ep}.gif")
+            renderer.save_animation(gif_path, fps=10)
+            print(f"  Saved {gif_path}")
+            renderer.stop_recording()
 
     renderer.close()
 

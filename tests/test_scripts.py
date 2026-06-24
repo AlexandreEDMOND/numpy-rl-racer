@@ -90,6 +90,27 @@ def test_evaluate_headless(tmp_path):
     assert saved[0].stat().st_size > 0
 
 
+def test_evaluate_gif_flag(tmp_path):
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from evaluate import main
+        with patch("numpy_rl_racer.agent.dqn.DQNAgent.load"):
+            main([
+                "--headless",
+                "--episodes", "1",
+                "--max-steps", "3",
+                "--save-dir", str(tmp_path),
+                "--gif",
+            ])
+    finally:
+        sys.path[:] = orig_path
+    gifs = list(tmp_path.glob("eval_ep*.gif"))
+    assert len(gifs) == 1
+    assert gifs[0].stat().st_size > 0
+
+
 def _make_main():
     scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
     orig_path = sys.path.copy()
