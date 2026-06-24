@@ -174,3 +174,28 @@ def test_train_default_hyperparameters(tmp_path):
     assert kwargs["target_update_freq"] == 100
     assert kwargs["use_double_dqn"] is True
     assert kwargs["use_per"] is False
+    assert kwargs["use_dueling_dqn"] is False
+
+
+def test_train_dueling_dqn_flag(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--dueling-dqn",
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["use_dueling_dqn"] is True

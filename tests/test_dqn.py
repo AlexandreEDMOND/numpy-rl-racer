@@ -559,6 +559,48 @@ def test_prioritized_replay_buffer_seed_reproducibility():
         np.testing.assert_array_equal(arr1, arr2)
 
 
+def test_dueling_dqn_act():
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, use_dueling_dqn=True)
+    agent.epsilon = 0.0
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    action = agent.act(state, training=False)
+    assert 0 <= action < N_ACTIONS
+
+
+def test_dueling_dqn_training_step():
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, batch_size=4,
+                     use_dueling_dqn=True)
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for _ in range(20):
+        action = agent.act(state, training=True)
+        next_state = state + np.random.randn(6) * 0.01
+        reward = 0.1
+        done = False
+        loss = agent.train_step(state, action, reward, next_state, done)
+        assert np.isfinite(loss)
+
+
+def test_dueling_dqn_save_load(tmp_path):
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, use_dueling_dqn=True)
+    for layer in agent.online_net.layers:
+        layer.w[:] = 1.0
+        layer.b[:] = 2.0
+
+    path = str(tmp_path / "dueling_model.npz")
+    agent.save(path)
+
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, use_dueling_dqn=True)
+    agent2.load(path)
+
+    for l1, l2 in zip(agent.online_net.layers, agent2.online_net.layers):
+        np.testing.assert_array_equal(l1.w, l2.w)
+        np.testing.assert_array_equal(l1.b, l2.b)
+
+    for l1, l2 in zip(agent.online_net.layers, agent2.target_net.layers):
+        np.testing.assert_array_equal(l1.w, l2.w)
+        np.testing.assert_array_equal(l1.b, l2.b)
+
+
 def test_agent_seed_none_stochastic():
     agent1 = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, seed=None)
     agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, seed=None)

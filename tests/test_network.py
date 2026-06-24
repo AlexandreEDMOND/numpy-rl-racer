@@ -1,6 +1,6 @@
 import numpy as np
 
-from numpy_rl_racer.network import Dense, MLP, relu
+from numpy_rl_racer.network import Dense, DuelingMLP, MLP, relu
 
 
 def test_relu_positive():
@@ -132,3 +132,29 @@ def test_mlp_parameters_mutable():
     params[0][0][:] = 0.0
     np.testing.assert_array_equal(mlp.layers[0].w, 0.0)
     mlp.layers[0].w[:] = old_w
+
+
+def test_dueling_mlp_forward_output():
+    n_actions = 5
+    net = DuelingMLP(state_dim=4, hidden_sizes=[8], n_actions=n_actions)
+    x = np.random.randn(3, 4)
+    out = net.forward(x)
+    encoded = relu(net._cached_pre_relu[-1])
+    v = net.value_layer.forward(encoded)
+    a = net.advantage_layer.forward(encoded)
+    expected = v + a - np.mean(a, axis=1, keepdims=True)
+    np.testing.assert_allclose(out, expected)
+
+
+def test_dueling_mlp_backward():
+    n_actions = 5
+    net = DuelingMLP(state_dim=4, hidden_sizes=[8, 16], n_actions=n_actions)
+    x = np.random.randn(3, 4)
+    net.forward(x)
+    grad = np.random.randn(3, n_actions)
+    net.backward(grad)
+    for layer in net.layers:
+        assert layer.grad_w is not None, f"grad_w is None for {layer}"
+        assert layer.grad_b is not None, f"grad_b is None for {layer}"
+        assert not np.allclose(layer.grad_w, 0), f"grad_w is all zeros for {layer}"
+        assert not np.allclose(layer.grad_b, 0), f"grad_b is all zeros for {layer}"

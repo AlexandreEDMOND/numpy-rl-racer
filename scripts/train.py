@@ -67,6 +67,8 @@ def main(argv=None):
                         help="Disable Double DQN (enabled by default)")
     parser.add_argument("--use-per", action="store_true",
                         help="Enable Prioritized Experience Replay")
+    parser.add_argument("--dueling-dqn", action="store_true",
+                        help="Enable Dueling DQN architecture")
     args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -91,6 +93,7 @@ def main(argv=None):
         target_update_freq=args.target_update_freq,
         use_double_dqn=not args.no_double_dqn,
         use_per=args.use_per,
+        use_dueling_dqn=args.dueling_dqn,
         seed=args.seed,
     )
 
@@ -99,7 +102,8 @@ def main(argv=None):
         f"hidden_sizes={args.hidden_sizes}, buffer_size={args.buffer_size}, "
         f"epsilon_start={args.epsilon_start}, epsilon_min={args.epsilon_min}, "
         f"epsilon_decay={args.epsilon_decay}, target_update_freq={args.target_update_freq}, "
-        f"double_dqn={not args.no_double_dqn}, use_per={args.use_per}"
+        f"double_dqn={not args.no_double_dqn}, use_per={args.use_per}, "
+        f"dueling_dqn={args.dueling_dqn}"
     )
 
     logger = None
