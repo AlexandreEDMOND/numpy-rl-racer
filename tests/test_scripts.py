@@ -97,6 +97,49 @@ def _make_main():
         sys.path[:] = orig_path
 
 
+def _parse_scheduler_args(args=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--lr-scheduler", choices=["none", "exponential", "step"], default="none")
+    parser.add_argument("--lr-decay", type=float, default=0.99)
+    parser.add_argument("--lr-drop-every", type=int, default=100)
+    return parser.parse_args(args)
+
+
+def test_lr_scheduler_default_none():
+    parsed = _parse_scheduler_args([])
+    assert parsed.lr_scheduler == "none"
+
+
+def test_lr_scheduler_exponential():
+    parsed = _parse_scheduler_args(["--lr-scheduler", "exponential"])
+    assert parsed.lr_scheduler == "exponential"
+
+
+def test_lr_scheduler_step():
+    parsed = _parse_scheduler_args(["--lr-scheduler", "step"])
+    assert parsed.lr_scheduler == "step"
+
+
+def test_lr_decay_default():
+    parsed = _parse_scheduler_args(["--lr-scheduler", "exponential"])
+    assert parsed.lr_decay == 0.99
+
+
+def test_lr_decay_custom():
+    parsed = _parse_scheduler_args(["--lr-scheduler", "exponential", "--lr-decay", "0.95"])
+    assert parsed.lr_decay == 0.95
+
+
+def test_lr_drop_every_default():
+    parsed = _parse_scheduler_args(["--lr-scheduler", "step"])
+    assert parsed.lr_drop_every == 100
+
+
+def test_lr_drop_every_custom():
+    parsed = _parse_scheduler_args(["--lr-scheduler", "step", "--lr-drop-every", "50"])
+    assert parsed.lr_drop_every == 50
+
+
 def test_train_hyperparameters_passed_to_agent(tmp_path):
     main = _make_main()
     captured = []
