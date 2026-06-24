@@ -365,3 +365,121 @@ class TestDenseWeightDecay:
             assert layer.weight_decay == 0.0
         for layer in agent.target_net.layers:
             assert layer.weight_decay == 0.0
+
+
+class TestSGDGradientClipping:
+    def test_clipping_reduces_large_gradients(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(3, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(3, 1))
+        for layer in mlp.layers:
+            layer.grad_w[:] = 100.0
+            layer.grad_b[:] = 100.0
+
+        opt = SGD(mlp, lr=0.01, max_grad_norm=1.0)
+        old_w = [layer.w.copy() for layer in mlp.layers]
+        old_b = [layer.b.copy() for layer in mlp.layers]
+        opt.step()
+
+        effective_norm_sq = 0.0
+        for i, layer in enumerate(mlp.layers):
+            delta_w = (old_w[i] - layer.w) / 0.01
+            delta_b = (old_b[i] - layer.b) / 0.01
+            effective_norm_sq += np.sum(delta_w ** 2) + np.sum(delta_b ** 2)
+        effective_norm = np.sqrt(effective_norm_sq)
+
+        expected_norm = 1.0
+        assert np.isclose(effective_norm, expected_norm, rtol=1e-6), (
+            f"Effective gradient norm {effective_norm} != {expected_norm}"
+        )
+
+    def test_no_clipping_when_norm_below_threshold(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(3, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(3, 1))
+        for layer in mlp.layers:
+            layer.grad_w[:] = 0.5
+            layer.grad_b[:] = 0.5
+
+        actual_norm = np.sqrt(sum(np.sum(layer.grad_w ** 2) + np.sum(layer.grad_b ** 2)
+                                  for layer in mlp.layers))
+
+        opt = SGD(mlp, lr=0.01, max_grad_norm=1000.0)
+        old_w = [layer.w.copy() for layer in mlp.layers]
+        old_b = [layer.b.copy() for layer in mlp.layers]
+        opt.step()
+
+        effective_norm_sq = 0.0
+        for i, layer in enumerate(mlp.layers):
+            delta_w = (old_w[i] - layer.w) / 0.01
+            delta_b = (old_b[i] - layer.b) / 0.01
+            effective_norm_sq += np.sum(delta_w ** 2) + np.sum(delta_b ** 2)
+        effective_norm = np.sqrt(effective_norm_sq)
+
+        assert np.isclose(effective_norm, actual_norm, rtol=1e-6), (
+            f"Effective gradient norm {effective_norm} changed when it should not"
+        )
+
+    def test_max_grad_none_preserves_gradients(self):
+        rng = np.random.RandomState(42)
+        mlp1 = MLP([2, 4, 1])
+        mlp2 = MLP([2, 4, 1])
+        mlp2.layers[0].w = mlp1.layers[0].w.copy()
+        mlp2.layers[0].b = mlp1.layers[0].b.copy()
+        mlp2.layers[1].w = mlp1.layers[1].w.copy()
+        mlp2.layers[1].b = mlp1.layers[1].b.copy()
+
+        x = rng.randn(3, 2)
+        grad = rng.randn(3, 1)
+        mlp1.forward(x)
+        mlp1.backward(grad)
+        mlp2.forward(x)
+        mlp2.backward(grad)
+
+        opt_none = SGD(mlp1, lr=0.01, max_grad_norm=None)
+        opt_default = SGD(mlp2, lr=0.01)
+
+        opt_none.step()
+        opt_default.step()
+
+        for l1, l2 in zip(mlp1.layers, mlp2.layers):
+            np.testing.assert_array_equal(l1.w, l2.w)
+            np.testing.assert_array_equal(l1.b, l2.b)
+
+    def test_clipping_with_momentum(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(3, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(3, 1))
+        for layer in mlp.layers:
+            layer.grad_w[:] = 100.0
+            layer.grad_b[:] = 100.0
+
+        actual_norm = np.sqrt(sum(np.sum(layer.grad_w ** 2) + np.sum(layer.grad_b ** 2)
+                                  for layer in mlp.layers))
+        lr = 0.01
+        momentum = 0.9
+
+        opt = SGD(mlp, lr=lr, momentum=momentum, max_grad_norm=1.0)
+        opt.step()
+
+        assert opt._velocities is not None
+        scale = 1.0 / actual_norm
+        for layer in mlp.layers:
+            vel = opt._velocities[layer]
+            expected_vw = -lr * scale * np.full_like(layer.w, 100.0)
+            expected_vb = -lr * scale * np.full_like(layer.b, 100.0)
+            np.testing.assert_array_almost_equal(vel["w"], expected_vw)
+            np.testing.assert_array_almost_equal(vel["b"], expected_vb)
+
+    def test_dqn_agent_passes_max_grad_norm(self):
+        from numpy_rl_racer.agent import DQNAgent
+        agent = DQNAgent(state_dim=4, hidden_sizes=[8], lr=0.01, max_grad_norm=5.0)
+        assert agent.optimizer.max_grad_norm == 5.0
+
+    def test_dqn_agent_default_max_grad_norm(self):
+        from numpy_rl_racer.agent import DQNAgent
+        agent = DQNAgent(state_dim=4, hidden_sizes=[8], lr=0.01)
+        assert agent.optimizer.max_grad_norm is None
