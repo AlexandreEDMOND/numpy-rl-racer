@@ -108,15 +108,32 @@ class DuelingMLP:
 
 
 class SGD:
-    def __init__(self, mlp, lr=1e-3, scheduler=None):
+    def __init__(self, mlp, lr=1e-3, scheduler=None, momentum=0.0):
         self.mlp = mlp
         self.scheduler = scheduler
         self.lr = scheduler.lr if scheduler is not None else lr
+        self.momentum = momentum
+        self._velocities = None
 
     def step(self):
-        for layer in self.mlp.layers:
-            layer.w -= self.lr * layer.grad_w
-            layer.b -= self.lr * layer.grad_b
+        if self.momentum == 0.0:
+            for layer in self.mlp.layers:
+                layer.w -= self.lr * layer.grad_w
+                layer.b -= self.lr * layer.grad_b
+        else:
+            if self._velocities is None:
+                self._velocities = {}
+                for layer in self.mlp.layers:
+                    self._velocities[layer] = {
+                        "w": np.zeros_like(layer.w),
+                        "b": np.zeros_like(layer.b),
+                    }
+            for layer in self.mlp.layers:
+                vel = self._velocities[layer]
+                vel["w"] = self.momentum * vel["w"] - self.lr * layer.grad_w
+                vel["b"] = self.momentum * vel["b"] - self.lr * layer.grad_b
+                layer.w += vel["w"]
+                layer.b += vel["b"]
         if self.scheduler is not None:
             self.scheduler.step()
             self.lr = self.scheduler.lr
