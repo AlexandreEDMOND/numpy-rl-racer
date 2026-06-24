@@ -8,7 +8,7 @@ from numpy_rl_racer.env import CircularTrack, RacingEnv
 from numpy_rl_racer.rendering import MatplotlibRenderer
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Evaluate a trained DQN agent in the RacingEnv.")
     parser.add_argument("--model-path", default="models/best_model.npz", help="Path to saved model parameters")
     parser.add_argument("--episodes", type=int, default=3, help="Number of evaluation episodes")
@@ -17,7 +17,8 @@ def main():
     parser.add_argument("--seed", type=int, default=42, help="Random seed for evaluation")
     parser.add_argument("--track", choices=["rectangular", "circular"], default="rectangular",
                         help="Track type to use (default: rectangular)")
-    args = parser.parse_args()
+    parser.add_argument("--headless", action="store_true", help="Run in headless mode (no GUI window)")
+    args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
 
@@ -32,7 +33,7 @@ def main():
     agent.load(args.model_path)
     agent.epsilon = 0.0
 
-    renderer = MatplotlibRenderer(env.track)
+    renderer = MatplotlibRenderer(env.track, headless=args.headless)
 
     total_rewards = []
     total_steps = []

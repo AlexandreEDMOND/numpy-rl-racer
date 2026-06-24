@@ -1,5 +1,7 @@
 import argparse
 import os
+import sys
+from unittest.mock import patch
 
 from numpy_rl_racer.env import CircularTrack, RacingEnv, RectangularTrack
 
@@ -59,3 +61,23 @@ def test_log_dir_nested_path_parsing():
     result = _parse_log_dir(["--log-dir", "a/b/c"])
     assert result == "a/b/c"
     assert os.path.normpath(result) == "a/b/c"
+
+
+def test_evaluate_headless(tmp_path):
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from evaluate import main
+        with patch("numpy_rl_racer.agent.dqn.DQNAgent.load"):
+            main([
+                "--headless",
+                "--episodes", "1",
+                "--max-steps", "3",
+                "--save-dir", str(tmp_path),
+            ])
+    finally:
+        sys.path[:] = orig_path
+    saved = list(tmp_path.glob("eval_ep*_final.png"))
+    assert len(saved) == 1
+    assert saved[0].stat().st_size > 0
