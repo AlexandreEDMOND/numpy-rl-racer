@@ -187,17 +187,141 @@ class DQNAgent:
         for i, layer in enumerate(self.online_net.layers):
             params[f"layer_{i}_w"] = layer.w
             params[f"layer_{i}_b"] = layer.b
+        for i, layer in enumerate(self.target_net.layers):
+            params[f"tlayer_{i}_w"] = layer.w
+            params[f"tlayer_{i}_b"] = layer.b
+        if self.optimizer._velocities is not None:
+            for i, layer in enumerate(self.online_net.layers):
+                vel = self.optimizer._velocities.get(layer)
+                if vel is not None:
+                    params[f"vel_{i}_w"] = vel["w"]
+                    params[f"vel_{i}_b"] = vel["b"]
+        params["epsilon"] = np.array(self.epsilon)
+        params["step_counter"] = np.array(self._step_counter)
+        if self.rng is not None:
+            rng_state = self.rng.get_state()
+            params["rng_key"] = rng_state[1]
+            params["rng_pos"] = np.array(rng_state[2])
+            params["rng_has_gauss"] = np.array(rng_state[3])
+            params["rng_cached_gaussian"] = np.array(rng_state[4])
+        if self._n_step_buffer:
+            params["ns_state"] = np.array([t[0] for t in self._n_step_buffer])
+            params["ns_action"] = np.array([t[1] for t in self._n_step_buffer])
+            params["ns_reward"] = np.array([t[2] for t in self._n_step_buffer])
+            params["ns_next_state"] = np.array([t[3] for t in self._n_step_buffer])
+            params["ns_done"] = np.array([t[4] for t in self._n_step_buffer])
+        buf = self.replay_buffer
+        if len(buf) > 0:
+            if self.use_per:
+                tree = buf.tree
+                params["per_tree"] = tree.tree
+                params["per_capacity"] = np.array(tree.capacity)
+                params["per_pos"] = np.array(tree.pos)
+                params["per_size"] = np.array(tree.size)
+                valid = [(i, tree.data[i]) for i in range(tree.capacity) if tree.data[i] is not None]
+                if valid:
+                    indices, entries = zip(*valid)
+                    params["per_data_indices"] = np.array(indices)
+                    params["per_data_states"] = np.array([e[0] for e in entries])
+                    params["per_data_actions"] = np.array([e[1] for e in entries])
+                    params["per_data_rewards"] = np.array([e[2] for e in entries])
+                    params["per_data_next_states"] = np.array([e[3] for e in entries])
+                    params["per_data_dones"] = np.array([e[4] for e in entries], dtype=bool)
+                params["per_max_priority"] = np.array(buf.max_priority)
+                params["per_step"] = np.array(buf._step)
+                params["per_beta"] = np.array(buf.beta)
+            else:
+                params["buffer_states"] = np.array([t[0] for t in buf.buffer])
+                params["buffer_actions"] = np.array([t[1] for t in buf.buffer])
+                params["buffer_rewards"] = np.array([t[2] for t in buf.buffer])
+                params["buffer_next_states"] = np.array([t[3] for t in buf.buffer])
+                params["buffer_dones"] = np.array([t[4] for t in buf.buffer], dtype=bool)
+                params["buffer_pos"] = np.array(buf.pos)
         np.savez(path, **params)
 
     def load(self, path):
-        data = np.load(path)
+        data = np.load(path, allow_pickle=False)
         for i, layer in enumerate(self.online_net.layers):
             key_w = f"layer_{i}_w"
             key_b = f"layer_{i}_b"
             if key_w in data and key_b in data:
                 layer.w[:] = data[key_w]
                 layer.b[:] = data[key_b]
-        self._hard_update_target()
+        if "tlayer_0_w" in data:
+            for i, layer in enumerate(self.target_net.layers):
+                key_w = f"tlayer_{i}_w"
+                key_b = f"tlayer_{i}_b"
+                if key_w in data and key_b in data:
+                    layer.w[:] = data[key_w]
+                    layer.b[:] = data[key_b]
+        else:
+            self._hard_update_target()
+        if self.optimizer.momentum > 0 and "vel_0_w" in data:
+            if self.optimizer._velocities is None:
+                self.optimizer._velocities = {}
+            for i, layer in enumerate(self.online_net.layers):
+                kw, kb = f"vel_{i}_w", f"vel_{i}_b"
+                if kw in data and kb in data:
+                    self.optimizer._velocities[layer] = {
+                        "w": data[kw].copy(),
+                        "b": data[kb].copy(),
+                    }
+        if "epsilon" in data:
+            self.epsilon = float(data["epsilon"])
+        if "step_counter" in data:
+            self._step_counter = int(data["step_counter"])
+        if self.rng is not None and "rng_key" in data:
+            self.rng.set_state((
+                "MT19937",
+                data["rng_key"],
+                int(data["rng_pos"]),
+                int(data["rng_has_gauss"]),
+                float(data["rng_cached_gaussian"]),
+            ))
+        if "ns_state" in data:
+            self._n_step_buffer = []
+            for i in range(len(data["ns_state"])):
+                self._n_step_buffer.append((
+                    data["ns_state"][i],
+                    int(data["ns_action"][i]),
+                    float(data["ns_reward"][i]),
+                    data["ns_next_state"][i],
+                    bool(data["ns_done"][i]),
+                ))
+        if "per_tree" in data:
+            tree = self.replay_buffer.tree
+            tree.tree = data["per_tree"]
+            tree.pos = int(data["per_pos"])
+            tree.size = int(data["per_size"])
+            tree.capacity = int(data["per_capacity"])
+            tree.data = [None] * tree.capacity
+            if "per_data_indices" in data:
+                indices = data["per_data_indices"]
+                states = data["per_data_states"]
+                actions = data["per_data_actions"]
+                rewards = data["per_data_rewards"]
+                next_states = data["per_data_next_states"]
+                dones = data["per_data_dones"]
+                for j in range(len(indices)):
+                    tree.data[int(indices[j])] = (
+                        states[j], int(actions[j]), float(rewards[j]),
+                        next_states[j], bool(dones[j]),
+                    )
+            self.replay_buffer.max_priority = float(data.get("per_max_priority", 1.0))
+            self.replay_buffer._step = int(data.get("per_step", 0))
+            self.replay_buffer.beta = float(data.get("per_beta", self.replay_buffer.beta0))
+        elif "buffer_states" in data:
+            buf = self.replay_buffer
+            buf.buffer = []
+            for i in range(len(data["buffer_states"])):
+                buf.buffer.append((
+                    data["buffer_states"][i],
+                    int(data["buffer_actions"][i]),
+                    float(data["buffer_rewards"][i]),
+                    data["buffer_next_states"][i],
+                    bool(data["buffer_dones"][i]),
+                ))
+            buf.pos = int(data["buffer_pos"])
 
     def _hard_update_target(self):
         for src, dst in zip(self.online_net.layers, self.target_net.layers):

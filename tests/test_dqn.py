@@ -129,7 +129,7 @@ def test_dqn_save_and_load(tmp_path):
         np.testing.assert_array_equal(l1.w, l2.w)
         np.testing.assert_array_equal(l1.b, l2.b)
 
-    for l1, l2 in zip(agent.online_net.layers, agent2.target_net.layers):
+    for l1, l2 in zip(agent.target_net.layers, agent2.target_net.layers):
         np.testing.assert_array_equal(l1.w, l2.w)
         np.testing.assert_array_equal(l1.b, l2.b)
 
@@ -513,7 +513,7 @@ def test_save_load_round_trip_soft_update(tmp_path):
     for l1, l2 in zip(agent.online_net.layers, agent2.online_net.layers):
         np.testing.assert_array_equal(l1.w, l2.w)
         np.testing.assert_array_equal(l1.b, l2.b)
-    for l1, l2 in zip(agent2.online_net.layers, agent2.target_net.layers):
+    for l1, l2 in zip(agent.target_net.layers, agent2.target_net.layers):
         np.testing.assert_array_equal(l1.w, l2.w)
         np.testing.assert_array_equal(l1.b, l2.b)
 
@@ -596,7 +596,7 @@ def test_dueling_dqn_save_load(tmp_path):
         np.testing.assert_array_equal(l1.w, l2.w)
         np.testing.assert_array_equal(l1.b, l2.b)
 
-    for l1, l2 in zip(agent.online_net.layers, agent2.target_net.layers):
+    for l1, l2 in zip(agent.target_net.layers, agent2.target_net.layers):
         np.testing.assert_array_equal(l1.w, l2.w)
         np.testing.assert_array_equal(l1.b, l2.b)
 
