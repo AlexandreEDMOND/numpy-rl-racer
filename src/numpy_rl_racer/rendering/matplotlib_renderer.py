@@ -20,6 +20,8 @@ class MatplotlibRenderer:
         self.ax.set_aspect("equal")
         self._compute_boundary_lines()
         self._draw_background()
+        self._recording = False
+        self._recording_frames = []
 
     def _compute_boundary_lines(self):
         if hasattr(self.track, 'radius'):
@@ -121,6 +123,36 @@ class MatplotlibRenderer:
         self.ax.grid(True, alpha=0.3)
         self.ax.set_title("numpy-rl-racer")
 
+    def start_recording(self):
+        self._recording = True
+        self._recording_frames = []
+
+    def capture_frame(self):
+        self.fig.canvas.draw()
+        rgba = np.asarray(self.fig.canvas.buffer_rgba())
+        self._recording_frames.append(rgba[:, :, :3].copy())
+
+    def stop_recording(self, clear=True):
+        self._recording = False
+        if clear:
+            self._recording_frames = []
+
+    def save_animation(self, filepath, fps=10):
+        if not self._recording_frames:
+            raise RuntimeError(
+                "No frames recorded. Call start_recording() and render() before save_animation()."
+            )
+        from PIL import Image
+        duration = int(1000 / fps)
+        frames = [Image.fromarray(frame) for frame in self._recording_frames]
+        frames[0].save(
+            filepath,
+            save_all=True,
+            append_images=frames[1:],
+            duration=duration,
+            loop=0,
+        )
+
     def render(self, state, step=None, reward=None, obstacles=None):
         self.ax.clear()
         self._draw_background()
@@ -154,6 +186,8 @@ class MatplotlibRenderer:
         self.ax.set_title(title)
 
         self.fig.canvas.draw_idle()
+        if self._recording:
+            self.capture_frame()
         if not self._headless:
             import matplotlib.pyplot as plt
             plt.pause(0.01)
@@ -168,3 +202,5 @@ class MatplotlibRenderer:
         if not self._headless:
             self._plt.close(self.fig)
         self.fig.clear()
+        self._recording = False
+        self._recording_frames = []
