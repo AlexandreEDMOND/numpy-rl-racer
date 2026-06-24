@@ -153,3 +153,20 @@ def test_headless_renderer_saves_figure(tmp_path):
     assert save_path.exists()
     assert save_path.stat().st_size > 0
     renderer.close()
+
+
+def test_save_animation_without_pillow_raises_import_error(tmp_path):
+    import sys
+    from unittest.mock import patch
+
+    track = RectangularTrack()
+    renderer = MatplotlibRenderer(track, headless=True)
+    state = CarState(x=1.0, y=1.0, heading=0.5, velocity=2.0)
+    renderer.start_recording()
+    renderer.render(state)
+    gif_path = tmp_path / "no_pillow.gif"
+
+    with patch.dict(sys.modules, {"PIL": None, "PIL.Image": None}):
+        with pytest.raises(ImportError, match="Pillow is required for GIF recording"):
+            renderer.save_animation(str(gif_path))
+    renderer.close()
