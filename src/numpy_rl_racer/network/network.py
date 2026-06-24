@@ -10,12 +10,13 @@ def mse_loss(pred, target):
 
 
 class Dense:
-    def __init__(self, in_features, out_features):
+    def __init__(self, in_features, out_features, weight_decay=0.0):
         self.w = np.random.randn(in_features, out_features) * np.sqrt(2.0 / in_features)
         self.b = np.zeros(out_features)
         self._x = None
         self.grad_w = None
         self.grad_b = None
+        self.weight_decay = weight_decay
 
     def forward(self, x):
         self._x = x
@@ -25,9 +26,11 @@ class Dense:
         x = self._x
         if x.ndim == 1:
             self.grad_w = np.outer(x, grad_output)
+            self.grad_w += self.weight_decay * self.w
             self.grad_b = grad_output.copy()
             return grad_output @ self.w.T
         self.grad_w = x.T @ grad_output
+        self.grad_w += self.weight_decay * self.w
         self.grad_b = np.sum(grad_output, axis=0)
         return grad_output @ self.w.T
 

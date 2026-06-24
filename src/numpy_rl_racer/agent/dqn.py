@@ -145,7 +145,7 @@ class DQNAgent:
                  use_double_dqn=True, use_per=False, alpha=0.6, beta0=0.4,
                  beta_anneal_steps=100000, tau=0.0, seed=None,
                  use_dueling_dqn=False, n_step=1, scheduler=None,
-                 momentum=0.0):
+                 momentum=0.0, weight_decay=0.0):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
         self.rng = np.random.RandomState(seed) if seed is not None else None
@@ -155,6 +155,10 @@ class DQNAgent:
         else:
             self.online_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
             self.target_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
+        for layer in self.online_net.layers:
+            layer.weight_decay = weight_decay
+        for layer in self.target_net.layers:
+            layer.weight_decay = weight_decay
         self._hard_update_target()
         self.optimizer = SGD(self.online_net, lr=lr, scheduler=scheduler, momentum=momentum)
         self.use_per = use_per
