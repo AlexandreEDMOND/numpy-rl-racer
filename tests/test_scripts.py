@@ -10,7 +10,7 @@ import pytest
 import numpy as np
 
 from numpy_rl_racer.agent.dqn import DQNAgent
-from numpy_rl_racer.env import CircularTrack, RacingEnv, RectangularTrack
+from numpy_rl_racer.env import CircularTrack, Obstacle, RacingEnv, RectangularTrack
 
 
 def _parse_track(args=None):
@@ -559,3 +559,124 @@ def test_config_not_required(tmp_path):
     assert kwargs["lr"] == 1e-3
     assert kwargs["batch_size"] == 64
     assert kwargs["gamma"] == 0.99
+
+
+def test_obstacles_default_none(tmp_path):
+    main = _make_main()
+    env_kwargs = []
+    agent_kwargs = []
+    real_init_env = RacingEnv.__init__
+    real_init_agent = DQNAgent.__init__
+
+    def tracking_env(self, **kwargs):
+        env_kwargs.append(kwargs)
+        real_init_env(self, **kwargs)
+
+    def tracking_agent(self, **kwargs):
+        agent_kwargs.append(kwargs)
+        real_init_agent(self, **kwargs)
+
+    with patch.object(RacingEnv, "__init__", tracking_env), \
+         patch.object(DQNAgent, "__init__", tracking_agent), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    assert env_kwargs[0].get("obstacles") is None
+    assert len(env_kwargs[0].get("obstacles") if env_kwargs[0].get("obstacles") else []) == 0
+    assert agent_kwargs[0]["state_dim"] == 6
+
+
+def test_obstacles_num_obstacles_3(tmp_path):
+    main = _make_main()
+    env_kwargs = []
+    agent_kwargs = []
+    real_init_env = RacingEnv.__init__
+    real_init_agent = DQNAgent.__init__
+
+    def tracking_env(self, **kwargs):
+        env_kwargs.append(kwargs)
+        real_init_env(self, **kwargs)
+
+    def tracking_agent(self, **kwargs):
+        agent_kwargs.append(kwargs)
+        real_init_agent(self, **kwargs)
+
+    with patch.object(RacingEnv, "__init__", tracking_env), \
+         patch.object(DQNAgent, "__init__", tracking_agent), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--num-obstacles", "3",
+            "--obstacle-seed", "0",
+        ])
+
+    obstacles = env_kwargs[0].get("obstacles")
+    assert obstacles is not None
+    assert len(obstacles) == 3
+    for obs in obstacles:
+        assert isinstance(obs, Obstacle)
+    assert agent_kwargs[0]["state_dim"] == 8
+
+
+def test_obstacles_seed_determinism(tmp_path):
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from train import _generate_obstacles
+        from numpy_rl_racer.env import RectangularTrack
+        track = RectangularTrack()
+        obs1 = _generate_obstacles(track, 3, seed=42)
+        obs2 = _generate_obstacles(track, 3, seed=42)
+        obs3 = _generate_obstacles(track, 3, seed=99)
+        for o1, o2 in zip(obs1, obs2):
+            assert o1.x == o2.x
+            assert o1.y == o2.y
+            assert o1.radius == o2.radius
+        assert any(o1.x != o3.x or o1.y != o3.y for o1, o3 in zip(obs1, obs3))
+    finally:
+        sys.path[:] = orig_path
+
+
+def test_train_with_obstacles_runs(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--num-obstacles", "2",
+            "--obstacle-seed", "7",
+        ])
+
+
+def test_obstacles_config_keys(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--num-obstacles", "4",
+            "--obstacle-seed", "123",
+        ])
+    config_path = os.path.join(tmp_path, "config.json")
+    assert os.path.exists(config_path)
+    with open(config_path) as f:
+        saved = json.load(f)
+    assert saved["num_obstacles"] == 4
+    assert saved["obstacle_seed"] == 123
