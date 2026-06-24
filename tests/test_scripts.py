@@ -199,3 +199,29 @@ def test_train_dueling_dqn_flag(tmp_path):
 
     kwargs = captured[0]
     assert kwargs["use_dueling_dqn"] is True
+
+
+def test_train_random_start_flag(tmp_path):
+    main = _make_main()
+    captured = []
+
+    real_init = RacingEnv.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(RacingEnv, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--random-start",
+        ])
+
+    assert any(kw.get("randomize_start") is True for kw in captured), (
+        "RacingEnv should be created with randomize_start=True when --random-start is passed"
+    )

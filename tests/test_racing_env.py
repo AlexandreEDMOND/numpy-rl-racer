@@ -125,6 +125,81 @@ def test_lap_completion_gives_bonus_reward():
     )
 
 
+# ── Centerline point ────────────────────────────────────────────
+
+
+def test_rectangular_centerline_point_zero():
+    track = RectangularTrack(width=10.0, height=8.0)
+    x, y, heading = track.centerline_point(0.0)
+    np.testing.assert_almost_equal(x, 0.0)
+    np.testing.assert_almost_equal(y, -4.0)
+    np.testing.assert_almost_equal(heading, 0.0)
+
+
+def test_rectangular_centerline_point_half():
+    track = RectangularTrack(width=10.0, height=8.0)
+    x, y, heading = track.centerline_point(0.5)
+    np.testing.assert_almost_equal(x, 0.0)
+    np.testing.assert_almost_equal(y, 4.0)
+    np.testing.assert_almost_equal(heading, np.pi)
+
+
+def test_rectangular_centerline_point_heading():
+    track = RectangularTrack(width=10.0, height=8.0)
+    _, _, h1 = track.centerline_point(0.25)
+    np.testing.assert_almost_equal(h1, np.pi / 2)
+    _, _, h2 = track.centerline_point(0.5)
+    np.testing.assert_almost_equal(h2, np.pi)
+    _, _, h3 = track.centerline_point(0.75)
+    np.testing.assert_almost_equal(h3, -np.pi / 2)
+
+
+def test_circular_centerline_point():
+    track = CircularTrack(radius=6.0)
+    x, y, h = track.centerline_point(0.0)
+    np.testing.assert_almost_equal(x, 0.0)
+    np.testing.assert_almost_equal(y, -6.0)
+    np.testing.assert_almost_equal(h, 0.0)
+    x, y, h = track.centerline_point(0.25)
+    np.testing.assert_almost_equal(x, 6.0)
+    np.testing.assert_almost_equal(y, 0.0)
+    np.testing.assert_almost_equal(h, np.pi / 2)
+    x, y, h = track.centerline_point(0.5)
+    np.testing.assert_almost_equal(x, 0.0)
+    np.testing.assert_almost_equal(y, 6.0)
+    np.testing.assert_almost_equal(h, np.pi)
+    x, y, h = track.centerline_point(0.75)
+    np.testing.assert_almost_equal(x, -6.0)
+    np.testing.assert_almost_equal(y, 0.0)
+    np.testing.assert_almost_equal(h, -np.pi / 2)
+
+
+# ── Randomize start ─────────────────────────────────────────────
+
+
+def test_env_random_start_disabled():
+    env = RacingEnv()
+    obs1 = env.reset(seed=42)
+    obs2 = env.reset(seed=42)
+    np.testing.assert_array_equal(obs1, obs2)
+
+
+def test_env_random_start_enabled():
+    env = RacingEnv(randomize_start=True)
+    obs1 = env.reset(seed=42)
+    obs2 = env.reset(seed=43)
+    assert not np.allclose(obs1[:2], obs2[:2]), (
+        "Different seeds should yield different start positions"
+    )
+
+
+def test_env_random_start_seeded():
+    env = RacingEnv(randomize_start=True)
+    obs1 = env.reset(seed=42)
+    obs2 = env.reset(seed=42)
+    np.testing.assert_array_equal(obs1, obs2)
+
+
 # ── CircularTrack ──────────────────────────────────────────────────
 
 

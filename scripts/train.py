@@ -71,15 +71,17 @@ def main(argv=None):
                         help="Enable Dueling DQN architecture")
     parser.add_argument("--n-step", type=int, default=1,
                         help="N-step returns for TD target (default: 1)")
+    parser.add_argument("--random-start", action="store_true",
+                        help="Randomize start position on each reset")
     args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
 
     if args.track == "circular":
         track = CircularTrack(radius=6.0, track_width=2.0)
-        env = RacingEnv(track=track)
+        env = RacingEnv(track=track, randomize_start=args.random_start)
     else:
-        env = RacingEnv()
+        env = RacingEnv(randomize_start=args.random_start)
 
     print(f"Track type: {args.track}")
     agent = DQNAgent(
