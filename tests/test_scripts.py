@@ -460,6 +460,30 @@ def test_config_saved_to_save_dir(tmp_path):
     assert saved_config["lr"] == 0.0005
 
 
+def test_script_randomize_start_cli(tmp_path):
+    main = _make_main()
+    env_kwargs = []
+    real_init = RacingEnv.__init__
+
+    def tracking_init(self, **kwargs):
+        env_kwargs.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(RacingEnv, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--no-randomize-start",
+        ])
+
+    assert len(env_kwargs) == 1
+    assert env_kwargs[0].get("randomize_start") is False
+
+
 def test_config_not_required(tmp_path):
     main = _make_main()
     captured = []

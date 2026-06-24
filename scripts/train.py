@@ -106,6 +106,8 @@ def main(argv=None):
                         help="Run evaluation every N training episodes (0 = disabled)")
     parser.add_argument("--eval-episodes", type=int, default=5,
                         help="Number of evaluation episodes per eval run")
+    parser.add_argument("--no-randomize-start", action="store_false", dest="randomize_start", default=True,
+                        help="Disable randomized start position (default: enabled)")
 
     known_args, _ = parser.parse_known_args(argv)
     if known_args.config:
@@ -124,9 +126,9 @@ def main(argv=None):
 
     if args.track == "circular":
         track = CircularTrack(radius=6.0, track_width=2.0)
-        env = RacingEnv(track=track)
+        env = RacingEnv(track=track, randomize_start=args.randomize_start)
     else:
-        env = RacingEnv()
+        env = RacingEnv(randomize_start=args.randomize_start)
 
     print(f"Track type: {args.track}")
     scheduler = None
