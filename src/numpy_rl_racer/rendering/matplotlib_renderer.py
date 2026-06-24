@@ -18,13 +18,53 @@ class MatplotlibRenderer:
             self._plt = plt
             self.fig, self.ax = plt.subplots(figsize=figsize)
         self.ax.set_aspect("equal")
+        self._compute_boundary_lines()
         self._draw_background()
+
+    def _compute_boundary_lines(self):
+        if hasattr(self.track, 'radius'):
+            R = float(self.track.radius)
+            tw2 = float(self.track.track_width) / 2.0
+            theta = np.linspace(0, 2 * np.pi, 200)
+            self._outer_boundary = np.column_stack([
+                (R + tw2) * np.cos(theta),
+                (R + tw2) * np.sin(theta),
+            ])
+            self._inner_boundary = np.column_stack([
+                (R - tw2) * np.cos(theta),
+                (R - tw2) * np.sin(theta),
+            ])
+        else:
+            hw = float(self.track.half_w)
+            hh = float(self.track.half_h)
+            tw2 = float(self.track.track_width) / 2.0
+            self._outer_boundary = np.array([
+                [-hw - tw2, -hh - tw2],
+                [hw + tw2, -hh - tw2],
+                [hw + tw2, hh + tw2],
+                [-hw - tw2, hh + tw2],
+                [-hw - tw2, -hh - tw2],
+            ])
+            self._inner_boundary = np.array([
+                [-hw + tw2, -hh + tw2],
+                [hw - tw2, -hh + tw2],
+                [hw - tw2, hh - tw2],
+                [-hw + tw2, hh - tw2],
+                [-hw + tw2, -hh + tw2],
+            ])
+
+    def _draw_boundary_lines(self):
+        self.ax.plot(self._outer_boundary[:, 0], self._outer_boundary[:, 1],
+                      color="#666666", linewidth=0.8, zorder=2)
+        self.ax.plot(self._inner_boundary[:, 0], self._inner_boundary[:, 1],
+                      color="#666666", linewidth=0.8, zorder=2)
 
     def _draw_background(self):
         if hasattr(self.track, 'radius'):
             self._draw_circular_background()
         else:
             self._draw_rectangular_background()
+        self._draw_boundary_lines()
 
     def _draw_rectangular_background(self):
         hw = float(self.track.half_w)
