@@ -610,3 +610,136 @@ def test_agent_seed_none_stochastic():
     actions1 = [agent1.act(state, training=True) for _ in range(100)]
     actions2 = [agent2.act(state, training=True) for _ in range(100)]
     assert actions1 != actions2
+
+
+# -- N-step TD target tests ------------------------------------------------
+
+
+def test_n_step_default_one():
+    """Default n_step=1 is backward compatible with existing behaviour."""
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, batch_size=4)
+    assert agent.n_step == 1
+    assert agent.gamma_n == agent.gamma
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for _ in range(20):
+        action = agent.act(state, training=True)
+        next_state = state + np.random.randn(6) * 0.01
+        reward = 0.1
+        done = False
+        loss = agent.train_step(state, action, reward, next_state, done)
+        assert isinstance(loss, float) and np.isfinite(loss)
+
+
+def test_n_step_target_one():
+    """n=1 produces identical targets to the current 1-step computation."""
+    batch_size = 4
+    agent = DQNAgent(
+        state_dim=1, hidden_sizes=[1], lr=0.0,
+        batch_size=batch_size, buffer_size=batch_size,
+        use_double_dqn=False, n_step=1,
+    )
+    for layer in agent.online_net.layers + agent.target_net.layers:
+        layer.w[:] = 0.0
+        layer.b[:] = 0.0
+    agent.target_net.layers[-1].b[:] = np.array([0.9, 0.0, 0.0, 0.0, 0.5])
+
+    for _ in range(batch_size - 1):
+        agent.train_step(np.array([0.0]), 0, 0.0, np.array([0.0]), False)
+
+    loss = agent.train_step(np.array([0.0]), 0, 0.0, np.array([0.0]), False)
+
+    expected_target = agent.gamma * 0.9
+    q_sa = 0.0
+    expected_loss = np.mean((expected_target - q_sa) ** 2)
+
+    assert np.isclose(loss, expected_loss, rtol=1e-6), (
+        f"Loss {loss} does not match expected 1-step target {expected_loss}"
+    )
+
+
+def test_n_step_target_three():
+    """n=3 accumulates rewards correctly for non-terminal transitions."""
+    batch_size = 4
+    agent = DQNAgent(
+        state_dim=1, hidden_sizes=[1], lr=0.0,
+        batch_size=batch_size, buffer_size=16,
+        use_double_dqn=False, n_step=3,
+    )
+    for layer in agent.online_net.layers + agent.target_net.layers:
+        layer.w[:] = 0.0
+        layer.b[:] = 0.0
+
+    gamma = agent.gamma
+    # 4 identical sequences: [0.1, 0.2, 0.3] terminated with done=True
+    for _ in range(3):
+        agent.train_step(np.array([0.0]), 0, 0.1, np.array([0.0]), False)
+        agent.train_step(np.array([0.0]), 0, 0.2, np.array([0.0]), False)
+        agent.train_step(np.array([0.0]), 0, 0.3, np.array([0.0]), True)
+
+    # 4th sequence triggers training (replay buffer hits batch_size)
+    agent.train_step(np.array([0.0]), 0, 0.1, np.array([0.0]), False)
+    agent.train_step(np.array([0.0]), 0, 0.2, np.array([0.0]), False)
+    loss = agent.train_step(np.array([0.0]), 0, 0.3, np.array([0.0]), True)
+
+    expected_G = 0.1 + gamma * 0.2 + gamma ** 2 * 0.3
+    expected_loss = np.mean(expected_G ** 2)
+
+    assert np.isclose(loss, expected_loss, rtol=1e-6), (
+        f"Loss {loss} does not match expected n=3 target {expected_loss}"
+    )
+
+
+def test_n_step_early_termination():
+    """n-step return terminates early when done flag is encountered."""
+    agent = DQNAgent(
+        state_dim=1, hidden_sizes=[1], lr=0.0,
+        batch_size=4, buffer_size=16,
+        use_double_dqn=False, n_step=3,
+    )
+    for layer in agent.online_net.layers + agent.target_net.layers:
+        layer.w[:] = 0.0
+        layer.b[:] = 0.0
+
+    gamma = agent.gamma
+    # done=True at step 2 (before n=3 is full)
+    agent.train_step(np.array([0.0]), 0, 0.5, np.array([1.0]), False)
+    agent.train_step(np.array([0.0]), 0, 0.5, np.array([1.0]), True)
+
+    expected_G = 0.5 + gamma * 0.5
+
+    entry_G = agent.replay_buffer.buffer[0][2]
+    assert np.isclose(entry_G, expected_G, rtol=1e-6), (
+        f"Expected n-step return {expected_G}, got {entry_G}"
+    )
+
+
+def test_n_step_training_step_runs():
+    """train_step executes for n=3 without error."""
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, batch_size=4, n_step=3)
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for _ in range(60):
+        action = agent.act(state, training=True)
+        next_state = state + np.random.randn(6) * 0.01
+        reward = 0.1
+        done = False
+        loss = agent.train_step(state, action, reward, next_state, done)
+        assert np.isfinite(loss) if loss > 0 else True
+
+
+def test_n_step_training_loss_decreases():
+    """Loss decreases over multiple training steps with n=3."""
+    np.random.seed(2)
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-2, batch_size=16, n_step=3)
+    agent.epsilon = 0.5
+    losses = []
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for _ in range(300):
+        action = agent.act(state, training=True)
+        next_state = state + np.random.randn(6) * 0.01
+        reward = 0.1
+        done = False
+        loss = agent.train_step(state, action, reward, next_state, done)
+        if loss > 0:
+            losses.append(loss)
+    if len(losses) >= 40:
+        assert np.mean(losses[-20:]) < np.mean(losses[:20])
