@@ -1,5 +1,5 @@
 {
-  "episodes": 100,
+  "episodes": 300,
   "max_steps": 200,
   "save_dir": "models",
   "seed": 42,

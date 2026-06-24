@@ -11,7 +11,10 @@ from numpy_rl_racer.rendering import MatplotlibRenderer
 
 
 def _record_episode(env, get_action, track, max_steps):
-    renderer = MatplotlibRenderer(track, headless=True)
+    renderer = MatplotlibRenderer(
+        track, headless=True,
+        reward_line_progress=getattr(env, '_reward_line_progress', None),
+    )
     renderer.start_recording()
     state = env.reset(seed=42)
     for step in range(max_steps):
@@ -43,8 +46,8 @@ def main(argv=None):
         track = CircularTrack(radius=6.0, track_width=2.0)
         env = RacingEnv(track=track)
     else:
-        track = env = RacingEnv().track
         env = RacingEnv()
+        track = env.track
 
     data = np.load(args.model_path)
     if "arch_type" in data:
