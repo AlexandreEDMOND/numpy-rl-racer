@@ -2,6 +2,47 @@ import numpy as np
 
 from numpy_rl_racer.network import MLP, SGD
 
+
+class SumTree:
+    def __init__(self, capacity):
+        self.capacity = capacity
+        self.tree = np.zeros(2 * capacity)
+        self.data = [None] * capacity
+        self.size = 0
+        self.pos = 0
+
+    def add(self, priority, data):
+        idx = self.capacity + self.pos
+        self.data[self.pos] = data
+        self._update(idx, priority)
+        self.pos = (self.pos + 1) % self.capacity
+        self.size = min(self.size + 1, self.capacity)
+
+    def _update(self, idx, priority):
+        change = priority - self.tree[idx]
+        self.tree[idx] = priority
+        while idx > 1:
+            idx //= 2
+            self.tree[idx] += change
+
+    def get(self, s):
+        idx = 1
+        while idx < self.capacity:
+            left = 2 * idx
+            if s <= self.tree[left]:
+                idx = left
+            else:
+                s -= self.tree[left]
+                idx = left + 1
+        data_idx = idx - self.capacity
+        return idx, self.tree[idx], self.data[data_idx]
+
+    def total(self):
+        return self.tree[1]
+
+    def update_priority(self, idx, priority):
+        self._update(idx, priority)
+
 ACTIONS = np.array([
     [-0.5, 1.0],
     [0.5, 1.0],
@@ -39,18 +80,78 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
+class PrioritizedReplayBuffer:
+    def __init__(self, capacity=10000, alpha=0.6, beta0=0.4, beta_anneal_steps=100000):
+        self.tree = SumTree(capacity)
+        self.alpha = alpha
+        self.beta0 = beta0
+        self.beta = beta0
+        self.beta_anneal_steps = beta_anneal_steps
+        self.max_priority = 1.0
+        self._step = 0
+
+    def push(self, state, action, reward, next_state, done):
+        self.tree.add(self.max_priority, (state, action, reward, next_state, done))
+
+    def sample(self, batch_size):
+        self._step += 1
+        self.beta = min(1.0, self.beta0 + (1.0 - self.beta0) * self._step / self.beta_anneal_steps)
+
+        batch = []
+        indices = np.zeros(batch_size, dtype=np.int64)
+        priorities = np.zeros(batch_size)
+        total = self.tree.total()
+        segment = total / batch_size
+
+        for i in range(batch_size):
+            a = segment * i
+            b = segment * (i + 1)
+            s = np.random.uniform(a, b)
+            idx, priority, data = self.tree.get(s)
+            indices[i] = idx
+            priorities[i] = priority
+            batch.append(data)
+
+        probs = priorities / total
+        is_weights = (1.0 / (len(batch) * probs)) ** self.beta
+        is_weights /= is_weights.max()
+
+        states = np.array([t[0] for t in batch])
+        actions = np.array([t[1] for t in batch])
+        rewards = np.array([t[2] for t in batch])
+        next_states = np.array([t[3] for t in batch])
+        dones = np.array([t[4] for t in batch])
+
+        return states, actions, rewards, next_states, dones, is_weights, indices
+
+    def update_priorities(self, indices, td_errors):
+        for idx, td in zip(indices, td_errors):
+            priority = abs(td) + 1e-6
+            self.max_priority = max(self.max_priority, priority)
+            self.tree.update_priority(idx, priority)
+
+    def __len__(self):
+        return self.tree.size
+
+
 class DQNAgent:
     def __init__(self, state_dim, hidden_sizes=None, lr=1e-3, gamma=0.99,
                  epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995,
                  buffer_size=10000, batch_size=64, target_update_freq=100,
-                 use_double_dqn=True):
+                 use_double_dqn=True, use_per=False, alpha=0.6, beta0=0.4,
+                 beta_anneal_steps=100000):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
         self.online_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
         self.target_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
         self._hard_update_target()
         self.optimizer = SGD(self.online_net, lr=lr)
-        self.replay_buffer = ReplayBuffer(buffer_size)
+        self.use_per = use_per
+        if use_per:
+            self.replay_buffer = PrioritizedReplayBuffer(buffer_size, alpha=alpha, beta0=beta0,
+                                                         beta_anneal_steps=beta_anneal_steps)
+        else:
+            self.replay_buffer = ReplayBuffer(buffer_size)
         self.gamma = gamma
         self.epsilon = epsilon
         self.epsilon_min = epsilon_min
@@ -93,7 +194,11 @@ class DQNAgent:
         if len(self.replay_buffer) < self.batch_size:
             return 0.0
 
-        states, actions, rewards, next_states, dones = self.replay_buffer.sample(self.batch_size)
+        if self.use_per:
+            states, actions, rewards, next_states, dones, is_weights, indices = \
+                self.replay_buffer.sample(self.batch_size)
+        else:
+            states, actions, rewards, next_states, dones = self.replay_buffer.sample(self.batch_size)
 
         next_q_target = self.target_net.forward(next_states)
         if self.use_double_dqn:
@@ -107,10 +212,16 @@ class DQNAgent:
         current_q = self.online_net.forward(states)
         q_sa = current_q[np.arange(self.batch_size), actions]
 
-        loss = np.mean((target_q - q_sa) ** 2)
-
-        grad_q = np.zeros_like(current_q)
-        grad_q[np.arange(self.batch_size), actions] = 2.0 * (q_sa - target_q) / self.batch_size
+        if self.use_per:
+            loss = np.mean(is_weights * (target_q - q_sa) ** 2)
+            grad_q = np.zeros_like(current_q)
+            grad_q[np.arange(self.batch_size), actions] = \
+                2.0 * is_weights * (q_sa - target_q) / self.batch_size
+        else:
+            loss = np.mean((target_q - q_sa) ** 2)
+            grad_q = np.zeros_like(current_q)
+            grad_q[np.arange(self.batch_size), actions] = \
+                2.0 * (q_sa - target_q) / self.batch_size
 
         self.online_net.backward(grad_q)
         self.optimizer.step()
@@ -120,5 +231,9 @@ class DQNAgent:
         self._step_counter += 1
         if self._step_counter % self.target_update_freq == 0:
             self._hard_update_target()
+
+        if self.use_per:
+            td_errors = np.abs(target_q - q_sa)
+            self.replay_buffer.update_priorities(indices, td_errors)
 
         return float(loss)

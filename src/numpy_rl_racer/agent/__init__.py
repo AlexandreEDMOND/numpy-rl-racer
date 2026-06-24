@@ -1,3 +1,3 @@
-from .dqn import DQNAgent, ReplayBuffer, ACTIONS, N_ACTIONS
+from .dqn import DQNAgent, ReplayBuffer, PrioritizedReplayBuffer, SumTree, ACTIONS, N_ACTIONS
 
-__all__ = ["DQNAgent", "ReplayBuffer", "ACTIONS", "N_ACTIONS"]
+__all__ = ["DQNAgent", "ReplayBuffer", "PrioritizedReplayBuffer", "SumTree", "ACTIONS", "N_ACTIONS"]
