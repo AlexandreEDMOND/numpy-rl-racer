@@ -161,6 +161,7 @@ class DQNAgent:
         self.use_double_dqn = use_double_dqn
         self.tau = tau
         self._step_counter = 0
+        self._last_avg_q = float("nan")
 
     def save(self, path):
         params = {}
@@ -216,6 +217,7 @@ class DQNAgent:
         target_q = rewards + self.gamma * max_next_q * (1.0 - dones)
 
         current_q = self.online_net.forward(states)
+        self._last_avg_q = float(np.mean(np.max(current_q, axis=1)))
         q_sa = current_q[np.arange(self.batch_size), actions]
 
         if self.use_per:

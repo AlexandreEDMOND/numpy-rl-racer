@@ -47,6 +47,7 @@ def main():
     parser.add_argument("--max-steps", type=int, default=200, help="Max steps per episode")
     parser.add_argument("--save-dir", default="models", help="Directory to save model parameters")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
+    parser.add_argument("--log-dir", default=None, help="Directory to save training log CSV")
     parser.add_argument("--track", choices=["rectangular", "circular"], default="rectangular",
                         help="Track type to use (default: rectangular)")
     args = parser.parse_args()
@@ -62,6 +63,11 @@ def main():
     print(f"Track type: {args.track}")
     agent = DQNAgent(state_dim=6)
 
+    logger = None
+    if args.log_dir:
+        from numpy_rl_racer.utils.logging import TrainingLogger
+        logger = TrainingLogger(os.path.join(args.log_dir, "training_log.csv"))
+
     episode_rewards = []
     episode_losses = []
     best_reward = -float("inf")
@@ -73,6 +79,7 @@ def main():
 
         ep_reward = 0.0
         ep_losses = []
+        ep_q_vals = []
 
         for step in range(args.max_steps):
             action_idx = agent.act(state)
@@ -81,11 +88,13 @@ def main():
             ep_reward += reward
             if loss > 0:
                 ep_losses.append(loss)
+                ep_q_vals.append(agent._last_avg_q)
             state = next_state
             if done:
                 break
 
-        avg_loss = np.mean(ep_losses) if ep_losses else 0.0
+        avg_loss = np.mean(ep_losses) if ep_losses else float("nan")
+        avg_q = np.mean(ep_q_vals) if ep_q_vals else float("nan")
         episode_rewards.append(ep_reward)
         episode_losses.append(avg_loss)
 
@@ -97,9 +106,22 @@ def main():
             f"steps={step + 1:3d}"
         )
 
+        if logger:
+            logger.log(
+                episode=ep,
+                total_reward=ep_reward,
+                steps=step + 1,
+                avg_loss=avg_loss,
+                epsilon=agent.epsilon,
+                avg_q_value=avg_q,
+            )
+
         if ep_reward > best_reward:
             best_reward = ep_reward
             agent.save(os.path.join(args.save_dir, "best_model.npz"))
+
+    if logger:
+        logger.close()
 
     agent.save(os.path.join(args.save_dir, "final_model.npz"))
     print(f"\nTraining complete. Best reward: {best_reward:.2f}")
