@@ -234,3 +234,93 @@ class SGD:
         if self.scheduler is not None:
             self.scheduler.step()
             self.lr = self.scheduler.lr
+
+
+class Adam:
+    def __init__(self, mlp, lr=1e-3, scheduler=None, betas=(0.9, 0.999), eps=1e-8,
+                 weight_decay=0.0, max_grad_norm=None):
+        self.mlp = mlp
+        self.scheduler = scheduler
+        self.lr = scheduler.lr if scheduler is not None else lr
+        self.beta1, self.beta2 = betas
+        self.eps = eps
+        self.weight_decay = weight_decay
+        self.max_grad_norm = max_grad_norm
+        self._moments = None
+        self._t = 0
+
+    def _update_sigma_adam(self, layer, m, v, t, lr, scale):
+        if hasattr(layer, "grad_sigma_w"):
+            if "sigma_w" not in m:
+                m["sigma_w"] = np.zeros_like(layer.sigma_w)
+                m["sigma_b"] = np.zeros_like(layer.sigma_b)
+                v["sigma_w"] = np.zeros_like(layer.sigma_w)
+                v["sigma_b"] = np.zeros_like(layer.sigma_b)
+
+            g_w = lr * scale * layer.grad_sigma_w
+            g_b = lr * scale * layer.grad_sigma_b
+
+            m["sigma_w"] = self.beta1 * m["sigma_w"] + (1 - self.beta1) * g_w
+            m["sigma_b"] = self.beta1 * m["sigma_b"] + (1 - self.beta1) * g_b
+            v["sigma_w"] = self.beta2 * v["sigma_w"] + (1 - self.beta2) * g_w ** 2
+            v["sigma_b"] = self.beta2 * v["sigma_b"] + (1 - self.beta2) * g_b ** 2
+
+            m_hat_w = m["sigma_w"] / (1 - self.beta1 ** t)
+            m_hat_b = m["sigma_b"] / (1 - self.beta1 ** t)
+            v_hat_w = v["sigma_w"] / (1 - self.beta2 ** t)
+            v_hat_b = v["sigma_b"] / (1 - self.beta2 ** t)
+
+            layer.sigma_w -= m_hat_w / (np.sqrt(v_hat_w) + self.eps)
+            layer.sigma_b -= m_hat_b / (np.sqrt(v_hat_b) + self.eps)
+
+    def step(self):
+        self._t += 1
+        t = self._t
+
+        if self.max_grad_norm is not None:
+            total_norm_sq = 0.0
+            for layer in self.mlp.layers:
+                total_norm_sq += np.sum(layer.grad_w ** 2) + np.sum(layer.grad_b ** 2)
+                if hasattr(layer, "grad_sigma_w"):
+                    total_norm_sq += np.sum(layer.grad_sigma_w ** 2) + np.sum(layer.grad_sigma_b ** 2)
+            total_norm = np.sqrt(total_norm_sq)
+            scale = self.max_grad_norm / total_norm if total_norm > self.max_grad_norm else 1.0
+        else:
+            scale = 1.0
+
+        if self._moments is None:
+            self._moments = {}
+            for layer in self.mlp.layers:
+                m = {"w": np.zeros_like(layer.w), "b": np.zeros_like(layer.b)}
+                v = {"w": np.zeros_like(layer.w), "b": np.zeros_like(layer.b)}
+                self._update_sigma_adam(layer, m, v, 1, 0.0, 0.0)
+                self._moments[layer] = (m, v)
+
+        for layer in self.mlp.layers:
+            m, v = self._moments[layer]
+
+            gw = scale * layer.grad_w
+            gb = scale * layer.grad_b
+
+            if self.weight_decay != 0.0:
+                gw = gw + self.weight_decay * layer.w
+                gb = gb + self.weight_decay * layer.b
+
+            m["w"] = self.beta1 * m["w"] + (1 - self.beta1) * gw
+            m["b"] = self.beta1 * m["b"] + (1 - self.beta1) * gb
+            v["w"] = self.beta2 * v["w"] + (1 - self.beta2) * gw ** 2
+            v["b"] = self.beta2 * v["b"] + (1 - self.beta2) * gb ** 2
+
+            m_hat_w = m["w"] / (1 - self.beta1 ** t)
+            m_hat_b = m["b"] / (1 - self.beta1 ** t)
+            v_hat_w = v["w"] / (1 - self.beta2 ** t)
+            v_hat_b = v["b"] / (1 - self.beta2 ** t)
+
+            layer.w -= self.lr * m_hat_w / (np.sqrt(v_hat_w) + self.eps)
+            layer.b -= self.lr * m_hat_b / (np.sqrt(v_hat_b) + self.eps)
+
+            self._update_sigma_adam(layer, m, v, t, self.lr, scale)
+
+        if self.scheduler is not None:
+            self.scheduler.step()
+            self.lr = self.scheduler.lr
