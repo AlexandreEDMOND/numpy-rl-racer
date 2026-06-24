@@ -360,6 +360,21 @@ def test_distance_to_edge_normalized_one_on_centerline_circular():
     np.testing.assert_almost_equal(obs[4], 1.0)
 
 
+def test_reset_does_not_mutate_global_np_random_state():
+    np.random.seed(0)
+    v1 = np.random.rand()
+    env = RacingEnv()
+    env.reset(seed=42)
+    v2 = np.random.rand()
+    np.random.seed(0)
+    v1_expected = np.random.rand()
+    v2_expected = np.random.rand()
+    assert v1 == v1_expected, "Global random state was corrupted before reset"
+    assert v2 == v2_expected, (
+        "env.reset(seed=42) mutated global np.random state"
+    )
+
+
 def test_distance_to_edge_normalized_zero_at_boundary_circular():
     track = CircularTrack(radius=6.0, track_width=2.0)
     env = RacingEnv(track=track)

@@ -143,14 +143,14 @@ class RacingEnv:
         self.current_progress = np.float64(0.0)
         self.prev_progress = np.float64(0.0)
         self.lap_count = 0
+        self._rng = None
 
     @property
     def goal_position(self):
         return self.track.goal_position
 
     def reset(self, seed=None):
-        if seed is not None:
-            np.random.seed(seed)
+        self._rng = np.random.default_rng(seed) if seed is not None else None
         sx, sy, sheading = self.track.start_position
         self.state = CarState(x=sx, y=sy, heading=sheading, velocity=0.0)
         self.current_progress = np.float64(0.0)
