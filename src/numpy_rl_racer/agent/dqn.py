@@ -139,7 +139,7 @@ class DQNAgent:
                  epsilon=1.0, epsilon_min=0.01, epsilon_decay=0.995,
                  buffer_size=10000, batch_size=64, target_update_freq=100,
                  use_double_dqn=True, use_per=False, alpha=0.6, beta0=0.4,
-                 beta_anneal_steps=100000):
+                 beta_anneal_steps=100000, tau=0.0):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
         self.online_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
@@ -159,6 +159,7 @@ class DQNAgent:
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
         self.use_double_dqn = use_double_dqn
+        self.tau = tau
         self._step_counter = 0
 
     def save(self, path):
@@ -182,6 +183,11 @@ class DQNAgent:
         for src, dst in zip(self.online_net.layers, self.target_net.layers):
             dst.w[:] = src.w
             dst.b[:] = src.b
+
+    def _soft_update_target(self, tau):
+        for src, dst in zip(self.online_net.layers, self.target_net.layers):
+            dst.w[:] = tau * src.w + (1.0 - tau) * dst.w
+            dst.b[:] = tau * src.b + (1.0 - tau) * dst.b
 
     def act(self, state, training=True):
         if training and np.random.random() < self.epsilon:
@@ -229,7 +235,9 @@ class DQNAgent:
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
         self._step_counter += 1
-        if self._step_counter % self.target_update_freq == 0:
+        if self.tau > 0.0:
+            self._soft_update_target(self.tau)
+        elif self._step_counter % self.target_update_freq == 0:
             self._hard_update_target()
 
         if self.use_per:
