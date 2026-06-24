@@ -42,6 +42,37 @@ This project implements every component of a deep RL system — kinematic car ph
 - Grid search script for hyperparameter tuning
 - Comprehensive test suite
 
+## Environment Overview
+
+The agent controls a **red car** (shown as a dot with a heading arrow) that drives on a 2D racetrack. The car uses a kinematic bicycle model — steering rotates its heading, and acceleration changes its speed. The goal is to **complete as many laps as possible** without driving off the road.
+
+Three track types are available, each with a **start/finish line** (green star marker) where the car begins and lap completion is detected:
+
+![Environment overview](images/environment_overview.png)
+
+**What the agent observes** (6-dimensional vector):
+| Observation | Description |
+|---|---|
+| `x`, `y` | Car position in world coordinates |
+| `heading` | Car orientation in radians |
+| `velocity` | Forward speed (0 to max_speed) |
+| `dist_to_edge` | Normalized distance to nearest road edge (0 = at edge, 1 = on centerline) |
+| `heading_error` | Angle between the car heading and the centerline tangent |
+
+**What the agent can do** (5 discrete actions):
+| Action | Steering | Acceleration |
+|---|---|---|
+| Steer left + accelerate | -0.5 | +1.0 |
+| Steer right + accelerate | +0.5 | +1.0 |
+| Go straight + accelerate | 0.0 | +1.0 |
+| Coast | 0.0 | 0.0 |
+| Brake | 0.0 | -0.5 |
+
+**Reward structure:**
+- **+0.1** per step while on the track
+- **+1.0** for completing a lap
+- **-1.0** for driving off the track or colliding with an obstacle (episode ends)
+
 ## Quickstart
 
 ```bash
