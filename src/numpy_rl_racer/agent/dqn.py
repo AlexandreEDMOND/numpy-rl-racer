@@ -2,7 +2,7 @@ import warnings
 
 import numpy as np
 
-from numpy_rl_racer.network import DuelingMLP, MLP, SGD
+from numpy_rl_racer.network import DuelingMLP, MLP, NoisyLinear, SGD
 
 
 class SumTree:
@@ -146,7 +146,7 @@ class DQNAgent:
                  buffer_size=10000, batch_size=64, target_update_freq=100,
                  use_double_dqn=True, use_per=False, alpha=0.6, beta0=0.4,
                  beta_anneal_steps=100000, tau=0.0, seed=None,
-                 use_dueling_dqn=False, n_step=1, scheduler=None,
+                 use_dueling_dqn=False, use_noisy=False, n_step=1, scheduler=None,
                  momentum=0.0, weight_decay=0.0, max_grad_norm=None):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
@@ -163,6 +163,14 @@ class DQNAgent:
             layer.weight_decay = weight_decay
         for layer in self.target_net.layers:
             layer.weight_decay = weight_decay
+        if use_noisy:
+            self._replace_output_layers_with_noisy(hidden_sizes, use_dueling_dqn)
+            for layer in self.online_net.layers + self.target_net.layers:
+                if isinstance(layer, NoisyLinear):
+                    layer.weight_decay = weight_decay
+            epsilon = 0.0
+            epsilon_min = 0.0
+            epsilon_decay = 1.0
         self._hard_update_target()
         self.optimizer = SGD(self.online_net, lr=lr, scheduler=scheduler, momentum=momentum, max_grad_norm=max_grad_norm)
         self.use_per = use_per
@@ -183,6 +191,7 @@ class DQNAgent:
         self.target_update_freq = target_update_freq
         self.use_double_dqn = use_double_dqn
         self.use_dueling_dqn = use_dueling_dqn
+        self.use_noisy = use_noisy
         self.tau = tau
         self._step_counter = 0
         self._last_avg_q = float("nan")
@@ -192,15 +201,24 @@ class DQNAgent:
         for i, layer in enumerate(self.online_net.layers):
             params[f"layer_{i}_w"] = layer.w
             params[f"layer_{i}_b"] = layer.b
+            if hasattr(layer, "sigma_w"):
+                params[f"layer_{i}_sigma_w"] = layer.sigma_w
+                params[f"layer_{i}_sigma_b"] = layer.sigma_b
         for i, layer in enumerate(self.target_net.layers):
             params[f"tlayer_{i}_w"] = layer.w
             params[f"tlayer_{i}_b"] = layer.b
+            if hasattr(layer, "sigma_w"):
+                params[f"tlayer_{i}_sigma_w"] = layer.sigma_w
+                params[f"tlayer_{i}_sigma_b"] = layer.sigma_b
         if self.optimizer._velocities is not None:
             for i, layer in enumerate(self.online_net.layers):
                 vel = self.optimizer._velocities.get(layer)
                 if vel is not None:
                     params[f"vel_{i}_w"] = vel["w"]
                     params[f"vel_{i}_b"] = vel["b"]
+                    if hasattr(layer, "sigma_w") and "sigma_w" in vel:
+                        params[f"vel_{i}_sigma_w"] = vel["sigma_w"]
+                        params[f"vel_{i}_sigma_b"] = vel["sigma_b"]
         params["epsilon"] = np.array(self.epsilon)
         params["step_counter"] = np.array(self._step_counter)
         if self.rng is not None:
@@ -290,6 +308,9 @@ class DQNAgent:
             if key_w in data and key_b in data:
                 layer.w[:] = data[key_w]
                 layer.b[:] = data[key_b]
+                if hasattr(layer, "sigma_w") and f"layer_{i}_sigma_w" in data:
+                    layer.sigma_w[:] = data[f"layer_{i}_sigma_w"]
+                    layer.sigma_b[:] = data[f"layer_{i}_sigma_b"]
         if "tlayer_0_w" in data:
             for i, layer in enumerate(self.target_net.layers):
                 key_w = f"tlayer_{i}_w"
@@ -297,6 +318,9 @@ class DQNAgent:
                 if key_w in data and key_b in data:
                     layer.w[:] = data[key_w]
                     layer.b[:] = data[key_b]
+                    if hasattr(layer, "sigma_w") and f"tlayer_{i}_sigma_w" in data:
+                        layer.sigma_w[:] = data[f"tlayer_{i}_sigma_w"]
+                        layer.sigma_b[:] = data[f"tlayer_{i}_sigma_b"]
         else:
             self._hard_update_target()
         if self.optimizer.momentum > 0 and "vel_0_w" in data:
@@ -305,10 +329,16 @@ class DQNAgent:
             for i, layer in enumerate(self.online_net.layers):
                 kw, kb = f"vel_{i}_w", f"vel_{i}_b"
                 if kw in data and kb in data:
-                    self.optimizer._velocities[layer] = {
+                    vel = {
                         "w": data[kw].copy(),
                         "b": data[kb].copy(),
                     }
+                    if hasattr(layer, "sigma_w"):
+                        kw_s, kb_s = f"vel_{i}_sigma_w", f"vel_{i}_sigma_b"
+                        if kw_s in data and kb_s in data:
+                            vel["sigma_w"] = data[kw_s].copy()
+                            vel["sigma_b"] = data[kb_s].copy()
+                    self.optimizer._velocities[layer] = vel
         if "epsilon" in data:
             self.epsilon = float(data["epsilon"])
         if "step_counter" in data:
@@ -366,15 +396,37 @@ class DQNAgent:
                 ))
             buf.pos = int(data["buffer_pos"])
 
+    def _replace_output_layers_with_noisy(self, hidden_sizes, use_dueling_dqn):
+        for net in [self.online_net, self.target_net]:
+            if use_dueling_dqn:
+                net.value_layer = NoisyLinear(hidden_sizes[-1], 1, rng=self.rng)
+                net.advantage_layer = NoisyLinear(hidden_sizes[-1], N_ACTIONS, rng=self.rng)
+                net.layers = net.shared_encoder + [net.value_layer, net.advantage_layer]
+            else:
+                last_idx = len(net.layers) - 1
+                net.layers[last_idx] = NoisyLinear(hidden_sizes[-1], N_ACTIONS, rng=self.rng)
+
     def _hard_update_target(self):
         for src, dst in zip(self.online_net.layers, self.target_net.layers):
             dst.w[:] = src.w
             dst.b[:] = src.b
+            if hasattr(src, "sigma_w"):
+                dst.sigma_w[:] = src.sigma_w
+                dst.sigma_b[:] = src.sigma_b
 
     def _soft_update_target(self, tau):
         for src, dst in zip(self.online_net.layers, self.target_net.layers):
             dst.w[:] = tau * src.w + (1.0 - tau) * dst.w
             dst.b[:] = tau * src.b + (1.0 - tau) * dst.b
+            if hasattr(src, "sigma_w"):
+                dst.sigma_w[:] = tau * src.sigma_w + (1.0 - tau) * dst.sigma_w
+                dst.sigma_b[:] = tau * src.sigma_b + (1.0 - tau) * dst.sigma_b
+
+    def _reset_noise_all(self):
+        for net in [self.online_net, self.target_net]:
+            for layer in net.layers:
+                if isinstance(layer, NoisyLinear):
+                    layer.reset_noise()
 
     def act(self, state, training=True):
         _rng = self.rng if self.rng is not None else np.random
@@ -454,5 +506,8 @@ class DQNAgent:
         if self.use_per:
             td_errors = np.abs(target_q - q_sa)
             self.replay_buffer.update_priorities(indices, td_errors)
+
+        if self.use_noisy:
+            self._reset_noise_all()
 
         return float(loss)

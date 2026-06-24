@@ -1,6 +1,6 @@
 import numpy as np
 
-from numpy_rl_racer.network import Dense, DuelingMLP, MLP, SGD, relu
+from numpy_rl_racer.network import Dense, DuelingMLP, MLP, NoisyLinear, SGD, relu
 from numpy_rl_racer.utils.scheduler import ExponentialDecay, LRScheduler, StepDecay
 
 
@@ -43,6 +43,46 @@ def test_dense_bias():
     x = np.random.randn(4, 2)
     out = layer.forward(x)
     np.testing.assert_array_equal(out, np.full((4, 2), [5.0, -3.0]))
+
+
+def test_noisy_linear_forward():
+    layer = NoisyLinear(4, 8)
+    x = np.random.randn(3, 4)
+    out = layer.forward(x)
+    assert out.shape == (3, 8)
+    assert out.dtype == np.float64
+
+
+def test_noisy_linear_stochastic():
+    layer = NoisyLinear(4, 8)
+    x = np.random.randn(3, 4)
+    out1 = layer.forward(x)
+    out2 = layer.forward(x)
+    assert not np.allclose(out1, out2)
+
+
+def test_noisy_linear_reset():
+    layer = NoisyLinear(4, 8)
+    x = np.random.randn(3, 4)
+    out1 = layer.forward(x)
+    layer.reset_noise()
+    out2 = layer.forward(x)
+    assert not np.allclose(out1, out2)
+
+
+def test_noisy_linear_seed():
+    rng1 = np.random.RandomState(42)
+    layer1 = NoisyLinear(4, 8, rng=rng1)
+    rng2 = np.random.RandomState(42)
+    layer2 = NoisyLinear(4, 8, rng=rng2)
+    layer1.w[:] = 1.0
+    layer1.b[:] = 0.0
+    layer2.w[:] = 1.0
+    layer2.b[:] = 0.0
+    x = np.array([[1.0, 2.0, 3.0, 4.0]])
+    out1 = layer1.forward(x)
+    out2 = layer2.forward(x)
+    np.testing.assert_array_equal(out1, out2)
 
 
 def test_mlp_forward_shape():
