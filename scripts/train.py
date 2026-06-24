@@ -4,7 +4,7 @@ import os
 import numpy as np
 
 from numpy_rl_racer.agent import DQNAgent, ACTIONS
-from numpy_rl_racer.env import RacingEnv
+from numpy_rl_racer.env import CircularTrack, RacingEnv
 
 
 def plot_training(episode_rewards, episode_losses, save_dir):
@@ -47,11 +47,19 @@ def main():
     parser.add_argument("--max-steps", type=int, default=200, help="Max steps per episode")
     parser.add_argument("--save-dir", default="models", help="Directory to save model parameters")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
+    parser.add_argument("--track", choices=["rectangular", "circular"], default="rectangular",
+                        help="Track type to use (default: rectangular)")
     args = parser.parse_args()
 
     os.makedirs(args.save_dir, exist_ok=True)
 
-    env = RacingEnv()
+    if args.track == "circular":
+        track = CircularTrack(radius=6.0, track_width=2.0)
+        env = RacingEnv(track=track)
+    else:
+        env = RacingEnv()
+
+    print(f"Track type: {args.track}")
     agent = DQNAgent(state_dim=6)
 
     episode_rewards = []
