@@ -1,6 +1,6 @@
 import numpy as np
 
-from numpy_rl_racer.network import Dense, DuelingMLP, MLP, NoisyLinear, SGD, relu
+from numpy_rl_racer.network import Dense, DuelingMLP, MLP, NoisyLinear, SGD, Adam, mse_loss, relu
 from numpy_rl_racer.utils.scheduler import ExponentialDecay, LRScheduler, StepDecay
 
 
@@ -523,3 +523,355 @@ class TestSGDGradientClipping:
         from numpy_rl_racer.agent import DQNAgent
         agent = DQNAgent(state_dim=4, hidden_sizes=[8], lr=0.01)
         assert agent.optimizer.max_grad_norm is None
+
+
+class TestAdamLinearRegression:
+    def test_adam_reduces_loss_on_linear_regression(self):
+        rng = np.random.RandomState(42)
+        mlp = MLP([4, 2])
+        true_w = rng.randn(4, 2)
+        true_b = rng.randn(2)
+        x = rng.randn(100, 4)
+        target = x @ true_w + true_b
+        opt = Adam(mlp, lr=0.1, betas=(0.9, 0.999))
+        loss_before = mse_loss(mlp.forward(x), target)
+        for _ in range(200):
+            pred = mlp.forward(x)
+            grad = 2.0 * (pred - target) / x.shape[0]
+            mlp.backward(grad)
+            opt.step()
+        loss_after = mse_loss(mlp.forward(x), target)
+        assert loss_after < loss_before * 0.5, f"Loss did not decrease: {loss_before:.6f} -> {loss_after:.6f}"
+
+    def test_adam_converges_to_correct_weights(self):
+        rng = np.random.RandomState(42)
+        mlp = MLP([2, 1])
+        layer = mlp.layers[0]
+        layer.w[:] = 0.0
+        layer.b[:] = 0.0
+        true_w = np.array([[2.0], [-1.0]])
+        true_b = np.array([0.5])
+        x = rng.randn(200, 2)
+        target = x @ true_w + true_b
+        opt = Adam(mlp, lr=0.1, betas=(0.9, 0.999))
+        for _ in range(500):
+            pred = mlp.forward(x)
+            grad = 2.0 * (pred - target) / x.shape[0]
+            mlp.backward(grad)
+            opt.step()
+        np.testing.assert_allclose(layer.w, true_w, atol=0.5)
+        np.testing.assert_allclose(layer.b, true_b, atol=0.5)
+
+
+class TestAdamWithMLP:
+    def test_adam_mlp_forward_backward_update(self):
+        rng = np.random.RandomState(42)
+        mlp = MLP([4, 8, 2])
+        x = rng.randn(16, 4)
+        target = rng.randn(16, 2)
+        opt = Adam(mlp, lr=0.01, betas=(0.9, 0.999))
+        for _ in range(50):
+            pred = mlp.forward(x)
+            loss_grad = 2.0 * (pred - target) / x.shape[0]
+            mlp.backward(loss_grad)
+            opt.step()
+        loss = mse_loss(mlp.forward(x), target)
+        assert loss < 10.0
+
+
+class TestAdamToyQuadratic:
+    def test_adam_solves_toy_quadratic(self):
+        rng = np.random.RandomState(42)
+        mlp = MLP([3, 1])
+        layer = mlp.layers[0]
+        layer.w[:] = rng.randn(3, 1) * 5.0
+        layer.b[:] = np.array([5.0])
+        A = rng.randn(3, 3)
+        A = A.T @ A
+        b_vec = rng.randn(3)
+        c = 1.0
+
+        def f_and_grad(wb):
+            w = wb[:3].reshape(3, 1)
+            b_val = wb[3:]
+            val = (w.T @ A @ w + b_vec @ w + c + 0.5 * b_val ** 2).item()
+            gw = 2.0 * A @ w + b_vec.reshape(3, 1)
+            gb = b_val
+            return val, gw, gb
+
+        w_init = layer.w.copy().ravel()
+        b_init = np.array([layer.b.item()])
+        loss_before, _, _ = f_and_grad(np.concatenate([w_init, b_init]))
+
+        opt = Adam(mlp, lr=0.1, betas=(0.9, 0.999))
+        for _ in range(1000):
+            val, gw, gb = f_and_grad(np.concatenate([layer.w.ravel(), [layer.b.item()]]))
+            layer.grad_w = gw.reshape(3, 1)
+            layer.grad_b = gb.ravel()
+            opt.step()
+
+        w_final = layer.w.copy().ravel()
+        b_final = np.array([layer.b.item()])
+        loss_after, _, _ = f_and_grad(np.concatenate([w_final, b_final]))
+        assert loss_after < loss_before * 0.1
+
+
+class TestAdamWeightDecay:
+    def test_weight_decay_penalizes_large_weights(self):
+        rng = np.random.RandomState(42)
+        x = rng.randn(50, 4)
+        target = rng.randn(50, 2)
+
+        mlp_wd = MLP([4, 2])
+        mlp_no = MLP([4, 2])
+        mlp_no.layers[0].w = mlp_wd.layers[0].w.copy()
+        mlp_no.layers[0].b = mlp_wd.layers[0].b.copy()
+
+        opt_wd = Adam(mlp_wd, lr=0.01, weight_decay=0.1, betas=(0.9, 0.999))
+        opt_no = Adam(mlp_no, lr=0.01, weight_decay=0.0, betas=(0.9, 0.999))
+        for _ in range(100):
+            for mlp in (mlp_wd, mlp_no):
+                pred = mlp.forward(x)
+                grad = 2.0 * (pred - target) / x.shape[0]
+                mlp.backward(grad)
+            opt_wd.step()
+            opt_no.step()
+
+        norm_wd = np.sum(mlp_wd.layers[0].w ** 2)
+        norm_no = np.sum(mlp_no.layers[0].w ** 2)
+        assert norm_wd < norm_no
+
+
+class TestAdamBiasCorrection:
+    def test_bias_correction_first_step(self):
+        rng = np.random.RandomState(42)
+        mlp = MLP([2, 1])
+        layer = mlp.layers[0]
+        layer.w[:] = 0.0
+        layer.b[:] = 0.0
+        x = rng.randn(10, 2)
+        target = x @ np.array([[1.0], [2.0]]) + 0.5
+        beta1, beta2 = 0.9, 0.999
+        opt = Adam(mlp, lr=0.1, betas=(beta1, beta2))
+        pred = mlp.forward(x)
+        grad = 2.0 * (pred - target) / x.shape[0]
+        mlp.backward(grad)
+        gw = layer.grad_w.copy()
+        gb = layer.grad_b.copy()
+        opt.step()
+        m, v = opt._moments[layer]
+        t = opt._t
+        assert t == 1
+        m_hat_w = m["w"] / (1 - beta1 ** t)
+        m_hat_b = m["b"] / (1 - beta1 ** t)
+        v_hat_w = v["w"] / (1 - beta2 ** t)
+        v_hat_b = v["b"] / (1 - beta2 ** t)
+        np.testing.assert_allclose(m_hat_w, gw, rtol=1e-6)
+        np.testing.assert_allclose(m_hat_b, gb, rtol=1e-6)
+        np.testing.assert_allclose(v_hat_w, gw ** 2, rtol=1e-6)
+        np.testing.assert_allclose(v_hat_b, gb ** 2, rtol=1e-6)
+
+    def test_bias_correction_second_step(self):
+        rng = np.random.RandomState(42)
+        mlp = MLP([2, 1])
+        layer = mlp.layers[0]
+        x = rng.randn(10, 2)
+        target = x @ np.array([[1.0], [2.0]]) + 0.5
+        beta1, beta2 = 0.9, 0.999
+        opt = Adam(mlp, lr=0.1, betas=(beta1, beta2))
+        pred = mlp.forward(x)
+        grad = 2.0 * (pred - target) / x.shape[0]
+        mlp.backward(grad)
+        gw1 = layer.grad_w.copy()
+        gb1 = layer.grad_b.copy()
+        opt.step()
+        pred = mlp.forward(x)
+        mlp.backward(2.0 * (pred - target) / x.shape[0])
+        gw2 = layer.grad_w.copy()
+        gb2 = layer.grad_b.copy()
+        opt.step()
+        m, v = opt._moments[layer]
+        t = opt._t
+        assert t == 2
+        m_hat_w = m["w"] / (1 - beta1 ** t)
+        m_hat_b = m["b"] / (1 - beta1 ** t)
+        v_hat_w = v["w"] / (1 - beta2 ** t)
+        v_hat_b = v["b"] / (1 - beta2 ** t)
+        expected_mw_hat = (beta1 * gw1 + gw2) / (1 + beta1)
+        expected_mb_hat = (beta1 * gb1 + gb2) / (1 + beta1)
+        expected_vw_hat = (beta2 * gw1 ** 2 + gw2 ** 2) / (1 + beta2)
+        expected_vb_hat = (beta2 * gb1 ** 2 + gb2 ** 2) / (1 + beta2)
+        np.testing.assert_allclose(m_hat_w, expected_mw_hat, rtol=1e-6)
+        np.testing.assert_allclose(m_hat_b, expected_mb_hat, rtol=1e-6)
+        np.testing.assert_allclose(v_hat_w, expected_vw_hat, rtol=1e-6)
+        np.testing.assert_allclose(v_hat_b, expected_vb_hat, rtol=1e-6)
+
+
+class TestAdamLRScheduler:
+    def test_adam_with_scheduler_produces_decreasing_lr(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(2, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(2, 1))
+        sched = ExponentialDecay(0.1, 0.5)
+        opt = Adam(mlp, scheduler=sched)
+        opt.step()
+        first_lr = opt.lr
+        opt.step()
+        second_lr = opt.lr
+        assert second_lr < first_lr
+
+    def test_adam_without_scheduler_leaves_lr_unchanged(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(2, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(2, 1))
+        opt = Adam(mlp, lr=0.01)
+        lr_before = opt.lr
+        opt.step()
+        assert opt.lr == lr_before
+
+    def test_adam_scheduler_lr_takes_precedence(self):
+        sched = ExponentialDecay(0.5, 0.9)
+        mlp = MLP([2, 4, 1])
+        opt = Adam(mlp, lr=0.01, scheduler=sched)
+        assert opt.lr == 0.5
+
+
+class _SingleLayerNet:
+    def __init__(self, layer):
+        self.layers = [layer]
+
+
+class TestAdamWithNoisyLinear:
+    def test_adam_noisy_linear_forward_backward_update(self):
+        layer = NoisyLinear(4, 3, rng=np.random.RandomState(42))
+        net = _SingleLayerNet(layer)
+        x = np.random.randn(8, 4)
+        target = np.random.randn(8, 3)
+        opt = Adam(net, lr=0.01)
+        for _ in range(20):
+            pred = layer.forward(x)
+            grad = 2.0 * (pred - target) / x.shape[0]
+            layer.backward(grad)
+            opt.step()
+        assert layer.sigma_w is not None
+
+    def test_adam_noisy_linear_reset_sigma_still_functions(self):
+        layer = NoisyLinear(4, 3, rng=np.random.RandomState(42))
+        net = _SingleLayerNet(layer)
+        x = np.random.randn(5, 4)
+        opt = Adam(net, lr=0.01)
+        layer.forward(x)
+        layer.backward(np.random.randn(5, 3))
+        opt.step()
+        old_sigma_w = layer.sigma_w.copy()
+        old_sigma_b = layer.sigma_b.copy()
+        layer.reset_noise()
+        assert np.allclose(layer.sigma_w, old_sigma_w)
+        assert np.allclose(layer.sigma_b, old_sigma_b)
+
+
+class TestAdamWithDuelingMLP:
+    def test_adam_dueling_mlp_forward_backward_update(self):
+        net = DuelingMLP(state_dim=4, hidden_sizes=[8], n_actions=3)
+        x = np.random.randn(6, 4)
+        target = np.random.randn(6, 3)
+        opt = Adam(net, lr=0.01)
+        for _ in range(20):
+            pred = net.forward(x)
+            grad = 2.0 * (pred - target) / x.shape[0]
+            net.backward(grad)
+            opt.step()
+        for layer in net.layers:
+            assert layer.grad_w is not None
+
+
+class TestAdamGradientClipping:
+    def test_clipping_reduces_large_gradients(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(3, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(3, 1))
+        for layer in mlp.layers:
+            layer.grad_w[:] = 100.0
+            layer.grad_b[:] = 100.0
+
+        original_lr = 0.01
+        opt = Adam(mlp, lr=original_lr, max_grad_norm=1.0)
+        old_w = [layer.w.copy() for layer in mlp.layers]
+        old_b = [layer.b.copy() for layer in mlp.layers]
+        opt.step()
+
+        effective_norm_sq = 0.0
+        for i, layer in enumerate(mlp.layers):
+            effective_norm_sq += np.sum((old_w[i] - layer.w) ** 2) + np.sum((old_b[i] - layer.b) ** 2)
+        assert np.sqrt(effective_norm_sq) > 0, "Update should not be zero"
+        for layer in mlp.layers:
+            layer.grad_w[:] = 100.0
+            layer.grad_b[:] = 100.0
+
+        opt2 = Adam(mlp, lr=original_lr, max_grad_norm=0.1)
+        old_w2 = [layer.w.copy() for layer in mlp.layers]
+        opt2.step()
+        change_norm_sq = 0.0
+        for i, layer in enumerate(mlp.layers):
+            change_norm_sq += np.sum((old_w2[i] - layer.w) ** 2)
+        change_norm = np.sqrt(change_norm_sq)
+
+        for layer in mlp.layers:
+            layer.grad_w[:] = 100.0
+            layer.grad_b[:] = 100.0
+        opt3 = Adam(mlp, lr=original_lr, max_grad_norm=0.01)
+        old_w3 = [layer.w.copy() for layer in mlp.layers]
+        opt3.step()
+        change_norm2_sq = 0.0
+        for i, layer in enumerate(mlp.layers):
+            change_norm2_sq += np.sum((old_w3[i] - layer.w) ** 2)
+        change_norm2 = np.sqrt(change_norm2_sq)
+        assert change_norm2 < change_norm, "Tighter clipping should reduce update magnitude"
+
+    def test_no_clipping_when_norm_below_threshold(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(3, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(3, 1))
+        for layer in mlp.layers:
+            layer.grad_w[:] = 0.5
+            layer.grad_b[:] = 0.5
+
+        opt = Adam(mlp, lr=0.01, max_grad_norm=1000.0)
+        opt.step()
+
+        gw = mlp.layers[0].grad_w.copy()
+        assert np.sqrt(np.sum(gw ** 2)) < 1000.0
+
+
+class TestAdamIndependentState:
+    def test_two_independent_optimizers(self):
+        rng = np.random.RandomState(42)
+        mlp1 = MLP([2, 1])
+        mlp2 = MLP([2, 1])
+        mlp2.layers[0].w = mlp1.layers[0].w.copy()
+        mlp2.layers[0].b = mlp1.layers[0].b.copy()
+        x = rng.randn(10, 2)
+        target = x @ np.array([[1.0], [2.0]]) + 0.5
+        opt1 = Adam(mlp1, lr=0.1, betas=(0.9, 0.999))
+        opt2 = Adam(mlp2, lr=0.1, betas=(0.9, 0.999))
+        pred1 = mlp1.forward(x)
+        grad1 = 2.0 * (pred1 - target) / x.shape[0]
+        mlp1.backward(grad1)
+        pred2 = mlp2.forward(x)
+        grad2 = 2.0 * (pred2 - target) / x.shape[0]
+        mlp2.backward(grad2)
+        opt1.step()
+        opt2.step()
+        assert opt1._t == 1
+        assert opt2._t == 1
+        m1, v1 = opt1._moments[mlp1.layers[0]]
+        m2, v2 = opt2._moments[mlp2.layers[0]]
+        np.testing.assert_array_equal(m1["w"], m2["w"])
+        np.testing.assert_array_equal(v1["w"], v2["w"])
+
+        m1["w"][:] = 999.0
+        assert not np.any(m2["w"] == 999.0), "Modifying one optimizer's state should not affect the other"
