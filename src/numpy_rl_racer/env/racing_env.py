@@ -168,7 +168,7 @@ class CircularTrack:
 
 
 class RacingEnv:
-    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None, randomize_start=True, obstacles=None):
+    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None, randomize_start=True, obstacles=None, time_penalty=0.0):
         if track is not None:
             self.track = track
         else:
@@ -176,10 +176,12 @@ class RacingEnv:
         self.randomize_start = randomize_start
         self.car = KinematicCar()
         self.dt = np.float64(dt)
+        self.time_penalty = np.float64(time_penalty)
         self.state = None
         self.current_progress = np.float64(0.0)
         self.prev_progress = np.float64(0.0)
         self.lap_count = 0
+        self.elapsed_time = np.float64(0.0)
         self.obstacles = obstacles if obstacles is not None else []
 
     @property
@@ -206,6 +208,7 @@ class RacingEnv:
         self.state = CarState(x=sx, y=sy, heading=sheading, velocity=0.0)
         self.prev_progress = np.float64(0.0)
         self.lap_count = 0
+        self.elapsed_time = np.float64(0.0)
         return self._get_observation()
 
     def step(self, action):
@@ -221,6 +224,8 @@ class RacingEnv:
         if obstacle_collision:
             done = True
 
+        self.elapsed_time += self.dt
+
         self.prev_progress = self.current_progress
         self.current_progress = self.track.progress_along_centerline(self.state.x, self.state.y)
 
@@ -233,10 +238,13 @@ class RacingEnv:
             self.lap_count += 1
             reward += np.float64(1.0)
 
+        reward -= self.time_penalty * self.dt
+
         info = {
             'progress': self.current_progress,
             'lap_count': self.lap_count,
             'goal_position': self.goal_position,
+            'elapsed_time': self.elapsed_time,
         }
 
         return self._get_observation(), reward, done, info

@@ -14,7 +14,7 @@ def test_logger_creates_csv_with_headers(tmp_path):
         reader = csv.reader(f)
         headers = next(reader)
 
-    assert headers == ["episode", "total_reward", "steps", "avg_loss", "epsilon", "avg_q_value"]
+    assert headers == ["episode", "total_reward", "steps", "avg_loss", "epsilon", "avg_q_value", "elapsed_time"]
 
 
 def test_logger_rows_contain_correct_types(tmp_path):
@@ -112,6 +112,31 @@ def test_logger_lr_column_when_fieldnames_include_lr(tmp_path):
         rows = list(reader)
     assert len(rows) == 1
     assert float(rows[0]["lr"]) == 0.01
+
+
+def test_logger_default_fieldnames_include_elapsed_time(tmp_path):
+    filepath = str(tmp_path / "log.csv")
+    logger = TrainingLogger(filepath)
+    logger.close()
+
+    with open(filepath) as f:
+        reader = csv.reader(f)
+        headers = next(reader)
+
+    assert "elapsed_time" in headers
+
+
+def test_logger_logs_elapsed_time_column(tmp_path):
+    filepath = str(tmp_path / "log.csv")
+    logger = TrainingLogger(filepath)
+    logger.log(episode=1, total_reward=10.0, steps=50, avg_loss=0.05, epsilon=0.9, avg_q_value=1.2, elapsed_time=5.0)
+    logger.close()
+
+    with open(filepath) as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+
+    assert float(rows[0]["elapsed_time"]) == 5.0
 
 
 def test_logger_data_preserved_after_close(tmp_path):
