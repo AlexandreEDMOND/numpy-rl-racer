@@ -1,4 +1,5 @@
 import argparse
+import csv
 import os
 import sys
 from unittest.mock import patch
@@ -242,3 +243,100 @@ def test_train_dueling_dqn_flag(tmp_path):
 
     kwargs = captured[0]
     assert kwargs["use_dueling_dqn"] is True
+
+
+def test_eval_freq_zero_skips_eval(tmp_path):
+    main = _make_main()
+    real_init = DQNAgent.__init__
+    with patch.object(DQNAgent, "__init__", lambda self, **kwargs: real_init(self, **kwargs)), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--log-dir", str(tmp_path),
+        ])
+    with open(os.path.join(tmp_path, "training_log.csv"), newline="") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames
+        assert "eval_reward_mean" not in fieldnames
+        assert "eval_reward_std" not in fieldnames
+
+
+def test_eval_csv_columns_present(tmp_path):
+    main = _make_main()
+    real_init = DQNAgent.__init__
+    with patch.object(DQNAgent, "__init__", lambda self, **kwargs: real_init(self, **kwargs)), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "4",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--log-dir", str(tmp_path),
+            "--eval-freq", "2",
+            "--eval-episodes", "3",
+        ])
+    with open(os.path.join(tmp_path, "training_log.csv"), newline="") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames
+        assert "eval_reward_mean" in fieldnames
+        assert "eval_reward_std" in fieldnames
+        rows = list(reader)
+    assert len(rows) == 4
+    assert rows[0]["eval_reward_mean"] == ""  # ep 1, no eval
+    assert rows[1]["eval_reward_mean"] != ""  # ep 2, eval ran
+    assert rows[2]["eval_reward_mean"] == ""  # ep 3, no eval
+    assert rows[3]["eval_reward_mean"] != ""  # ep 4, eval ran
+
+
+def test_epsilon_restored_after_eval(tmp_path):
+    main = _make_main()
+    epsilon_values = []
+    real_init = DQNAgent.__init__
+
+    def tracking_act(self, state, training=True):
+        epsilon_values.append(self.epsilon)
+        return 0
+
+    with patch.object(DQNAgent, "__init__", lambda self, **kwargs: real_init(self, **kwargs)), \
+         patch.object(DQNAgent, "act", tracking_act), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "3",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--eval-freq", "2",
+            "--eval-episodes", "2",
+            "--epsilon-start", "0.5",
+            "--epsilon-decay", "1.0",
+        ])
+    assert len(epsilon_values) == 5  # 3 training + 2 eval acts
+    assert epsilon_values[0] == 0.5  # ep 1 training
+    assert epsilon_values[1] == 0.5  # ep 2 training
+    assert epsilon_values[2] == 0.0  # ep 2 eval ep 1
+    assert epsilon_values[3] == 0.0  # ep 2 eval ep 2
+    assert epsilon_values[4] == 0.5  # ep 3 training (restored)
+
+
+def test_eval_training_curve_generated(tmp_path):
+    main = _make_main()
+    real_init = DQNAgent.__init__
+    with patch.object(DQNAgent, "__init__", lambda self, **kwargs: real_init(self, **kwargs)), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "2",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--eval-freq", "2",
+            "--eval-episodes", "1",
+        ])
+    curve_path = os.path.join(tmp_path, "training_curve.png")
+    assert os.path.exists(curve_path)
+    assert os.path.getsize(curve_path) > 0

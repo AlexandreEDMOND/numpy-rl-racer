@@ -8,7 +8,8 @@ from numpy_rl_racer.env import CircularTrack, RacingEnv
 from numpy_rl_racer.utils.scheduler import ExponentialDecay, StepDecay
 
 
-def plot_training(episode_rewards, episode_losses, save_dir):
+def plot_training(episode_rewards, episode_losses, save_dir,
+                  eval_at_episodes=None, eval_reward_means=None, eval_reward_stds=None):
     import matplotlib.pyplot as plt
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
@@ -20,8 +21,15 @@ def plot_training(episode_rewards, episode_losses, save_dir):
     ax1.set_xlabel("Episode")
     ax1.set_ylabel("Total Reward")
     ax1.set_title("Training Rewards")
-    ax1.legend()
+    ax1.legend(loc="upper left")
     ax1.grid(True, alpha=0.3)
+
+    if eval_reward_means is not None and len(eval_reward_means) > 0:
+        ax1_twin = ax1.twinx()
+        ax1_twin.errorbar(eval_at_episodes, eval_reward_means, yerr=eval_reward_stds,
+                          fmt="s-", color="purple", label="Eval Reward", markersize=4)
+        ax1_twin.set_ylabel("Eval Reward")
+        ax1_twin.legend(loc="upper right")
 
     non_zero = [x for x in episode_losses if x > 0]
     if non_zero:
@@ -78,6 +86,10 @@ def main(argv=None):
                         help="Decay rate for exponential scheduler, drop factor for step scheduler (default: 0.99)")
     parser.add_argument("--lr-drop-every", type=int, default=100,
                         help="Steps between LR drops for step scheduler (default: 100)")
+    parser.add_argument("--eval-freq", type=int, default=0,
+                        help="Run evaluation every N training episodes (0 = disabled)")
+    parser.add_argument("--eval-episodes", type=int, default=5,
+                        help="Number of evaluation episodes per eval run")
     args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -128,6 +140,8 @@ def main(argv=None):
     if args.log_dir:
         from numpy_rl_racer.utils.logging import TrainingLogger
         fieldnames = ["episode", "total_reward", "steps", "avg_loss", "epsilon", "avg_q_value"]
+        if args.eval_freq > 0:
+            fieldnames.extend(["eval_reward_mean", "eval_reward_std"])
         if args.lr_scheduler != "none":
             fieldnames.append("lr")
         logger = TrainingLogger(os.path.join(args.log_dir, "training_log.csv"),
@@ -136,6 +150,9 @@ def main(argv=None):
     episode_rewards = []
     episode_losses = []
     best_reward = -float("inf")
+    eval_at_episodes = []
+    eval_reward_means = []
+    eval_reward_stds = []
 
     for ep in range(1, args.episodes + 1):
         state = env.reset(seed=args.seed)
@@ -171,17 +188,45 @@ def main(argv=None):
             f"steps={step + 1:3d}"
         )
 
+        log_kwargs = dict(
+            episode=ep,
+            total_reward=ep_reward,
+            steps=step + 1,
+            avg_loss=avg_loss,
+            epsilon=agent.epsilon,
+            avg_q_value=avg_q,
+        )
+        if args.lr_scheduler != "none":
+            log_kwargs["lr"] = agent.optimizer.lr
+
+        if args.eval_freq > 0 and ep % args.eval_freq == 0:
+            original_epsilon = agent.epsilon
+            agent.epsilon = 0.0
+            _eval_rewards = []
+            for _ in range(args.eval_episodes):
+                state = env.reset(seed=args.seed)
+                if args.seed is not None:
+                    args.seed += 1
+                _ep_eval_reward = 0.0
+                for _ in range(args.max_steps):
+                    action_idx = agent.act(state)
+                    next_state, reward, done, _ = env.step(ACTIONS[action_idx])
+                    _ep_eval_reward += reward
+                    state = next_state
+                    if done:
+                        break
+                _eval_rewards.append(_ep_eval_reward)
+            agent.epsilon = original_epsilon
+            eval_mean = np.mean(_eval_rewards)
+            eval_std = np.std(_eval_rewards)
+            eval_at_episodes.append(ep)
+            eval_reward_means.append(eval_mean)
+            eval_reward_stds.append(eval_std)
+            print(f"  eval: reward={eval_mean:.2f} +/- {eval_std:.2f}")
+            log_kwargs["eval_reward_mean"] = eval_mean
+            log_kwargs["eval_reward_std"] = eval_std
+
         if logger:
-            log_kwargs = dict(
-                episode=ep,
-                total_reward=ep_reward,
-                steps=step + 1,
-                avg_loss=avg_loss,
-                epsilon=agent.epsilon,
-                avg_q_value=avg_q,
-            )
-            if args.lr_scheduler != "none":
-                log_kwargs["lr"] = agent.optimizer.lr
             logger.log(**log_kwargs)
 
         if ep_reward > best_reward:
@@ -195,7 +240,10 @@ def main(argv=None):
     print(f"\nTraining complete. Best reward: {best_reward:.2f}")
     print(f"Models saved to {args.save_dir}/")
 
-    plot_training(episode_rewards, episode_losses, args.save_dir)
+    plot_training(episode_rewards, episode_losses, args.save_dir,
+                  eval_at_episodes=eval_at_episodes,
+                  eval_reward_means=eval_reward_means,
+                  eval_reward_stds=eval_reward_stds)
 
 
 if __name__ == "__main__":
