@@ -3,6 +3,9 @@ import os
 import sys
 from unittest.mock import patch
 
+import numpy as np
+
+from numpy_rl_racer.agent.dqn import DQNAgent
 from numpy_rl_racer.env import CircularTrack, RacingEnv, RectangularTrack
 
 
@@ -81,3 +84,93 @@ def test_evaluate_headless(tmp_path):
     saved = list(tmp_path.glob("eval_ep*_final.png"))
     assert len(saved) == 1
     assert saved[0].stat().st_size > 0
+
+
+def _make_main():
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from train import main
+        return main
+    finally:
+        sys.path[:] = orig_path
+
+
+def test_train_hyperparameters_passed_to_agent(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--lr", "0.0005",
+            "--batch-size", "128",
+            "--gamma", "0.95",
+            "--hidden-sizes", "128", "128",
+            "--buffer-size", "5000",
+            "--epsilon-start", "0.9",
+            "--epsilon-min", "0.05",
+            "--epsilon-decay", "0.99",
+            "--target-update-freq", "50",
+            "--no-double-dqn",
+            "--use-per",
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["state_dim"] == 6
+    assert kwargs["lr"] == 0.0005
+    assert kwargs["batch_size"] == 128
+    assert kwargs["gamma"] == 0.95
+    assert np.array_equal(kwargs["hidden_sizes"], [128, 128])
+    assert kwargs["buffer_size"] == 5000
+    assert kwargs["epsilon"] == 0.9
+    assert kwargs["epsilon_min"] == 0.05
+    assert kwargs["epsilon_decay"] == 0.99
+    assert kwargs["target_update_freq"] == 50
+    assert kwargs["use_double_dqn"] is False
+    assert kwargs["use_per"] is True
+    assert kwargs["seed"] is None
+
+
+def test_train_default_hyperparameters(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["lr"] == 1e-3
+    assert kwargs["batch_size"] == 64
+    assert kwargs["gamma"] == 0.99
+    assert np.array_equal(kwargs["hidden_sizes"], [64, 64])
+    assert kwargs["buffer_size"] == 10000
+    assert kwargs["epsilon"] == 1.0
+    assert kwargs["epsilon_min"] == 0.01
+    assert kwargs["epsilon_decay"] == 0.995
+    assert kwargs["target_update_freq"] == 100
+    assert kwargs["use_double_dqn"] is True
+    assert kwargs["use_per"] is False
