@@ -11,8 +11,13 @@ from numpy_rl_racer.env.racing_env import (
     RectangularTrack,
     CircularTrack,
     Figure8Track,
+    reward_line_endpoints,
 )
 from numpy_rl_racer.rendering.matplotlib_renderer import MatplotlibRenderer
+
+
+def _reward_line_progress():
+    return list(np.linspace(0.0, 1.0, 12)[1:-1])
 
 
 def _draw_background(ax, track):
@@ -21,6 +26,9 @@ def _draw_background(ax, track):
     renderer.fig = ax.figure
     renderer.ax = ax
     renderer._headless = True
+    renderer._reward_line_endpoints = [
+        reward_line_endpoints(track, p) for p in _reward_line_progress()
+    ]
     renderer._compute_boundary_lines()
     renderer._draw_background()
 
@@ -84,10 +92,12 @@ def main():
         Line2D([0], [0], color="#666666", linewidth=0.8, label="Road boundaries"),
         Line2D([0], [0], linestyle="--", color="#aaaaaa", linewidth=0.5,
                label="Centerline"),
+        Line2D([0], [0], color="#2e86c1", linewidth=1.5,
+               label="Reward line (checkpoint)"),
     ]
 
     fig.legend(handles=legend_elements, loc="lower center",
-               ncol=6, fontsize=9, frameon=True,
+               ncol=7, fontsize=9, frameon=True,
                bbox_to_anchor=(0.5, -0.08))
 
     fig.suptitle("NumPy RL Racer — Environment Overview",

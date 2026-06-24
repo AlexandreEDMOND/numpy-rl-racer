@@ -1,7 +1,7 @@
 import numpy as np
 
 from numpy_rl_racer.env.car import CarState
-from numpy_rl_racer.env.racing_env import CircularTrack, Figure8Track, Obstacle, RacingEnv, RectangularTrack
+from numpy_rl_racer.env.racing_env import CircularTrack, Figure8Track, Obstacle, RacingEnv, RectangularTrack, reward_line_endpoints
 
 
 def test_reset_returns_numpy_observation():
@@ -748,3 +748,175 @@ def test_time_penalty_magnitude():
     np.testing.assert_almost_equal(
         r2, np.float64(0.1) - np.float64(0.1) * np.float64(0.05), decimal=12
     )
+
+
+# ── Reward lines ──────────────────────────────────────────────────────
+
+
+def test_get_centerline_point_rectangular():
+    track = RectangularTrack(width=10.0, height=8.0, track_width=2.0)
+    cx, cy, tangent = track.get_centerline_point(0.0)
+    np.testing.assert_almost_equal(cx, 0.0)
+    np.testing.assert_almost_equal(cy, -4.0)
+    np.testing.assert_almost_equal(tangent, 0.0)
+
+    cx, cy, tangent = track.get_centerline_point(0.25)
+    # At progress 0.25 on rectangular track the car should be at (5, 0) heading up
+    np.testing.assert_almost_equal(cx, 5.0)
+    np.testing.assert_almost_equal(cy, 0.0)
+    np.testing.assert_almost_equal(tangent, np.pi / 2.0)
+
+
+def test_get_centerline_point_circular():
+    track = CircularTrack(radius=6.0, track_width=2.0)
+    cx, cy, tangent = track.get_centerline_point(0.0)
+    np.testing.assert_almost_equal(cx, 0.0)
+    np.testing.assert_almost_equal(cy, -6.0)
+    np.testing.assert_almost_equal(tangent, 0.0)
+
+    cx, cy, tangent = track.get_centerline_point(0.25)
+    np.testing.assert_almost_equal(cx, 6.0)
+    np.testing.assert_almost_equal(cy, 0.0)
+    np.testing.assert_almost_equal(tangent, np.pi / 2.0)
+
+    cx, cy, tangent = track.get_centerline_point(0.5)
+    np.testing.assert_almost_equal(cx, 0.0)
+    np.testing.assert_almost_equal(cy, 6.0)
+    np.testing.assert_almost_equal(tangent, np.pi, decimal=5)
+
+
+def test_get_centerline_point_figure8():
+    track = Figure8Track(radius=6.0, track_width=2.0)
+    gx, gy = track.goal_position
+    cx, cy, tangent = track.get_centerline_point(0.0)
+    np.testing.assert_almost_equal(cx, float(gx), decimal=10)
+    np.testing.assert_almost_equal(cy, float(gy), decimal=10)
+
+    # t=0.5 should give the opposite point
+    cx, cy, tangent = track.get_centerline_point(0.5)
+    theta = 2.0 * np.pi * 0.5 + track._theta_offset
+    expected_x = track.radius * np.cos(theta)
+    expected_y = track.radius * np.sin(theta) * np.cos(theta)
+    np.testing.assert_almost_equal(float(cx), float(expected_x), decimal=10)
+    np.testing.assert_almost_equal(float(cy), float(expected_y), decimal=10)
+
+
+def test_reward_line_endpoints_span_track_width():
+    track = RectangularTrack(width=10.0, height=8.0, track_width=2.0)
+    for p in [0.1, 0.3, 0.5, 0.7, 0.9]:
+        (x1, y1), (x2, y2) = reward_line_endpoints(track, p)
+        # Both endpoints should be on the track surface
+        assert track.is_on_track(x1, y1), f"Endpoint ({x1},{y1}) off track at p={p}"
+        assert track.is_on_track(x2, y2), f"Endpoint ({x2},{y2}) off track at p={p}"
+        # Endpoints should be distinct (line has non-zero length)
+        assert abs(x1 - x2) > 0.01 or abs(y1 - y2) > 0.01
+
+
+def test_reward_line_not_crossed_when_stationary():
+    env = RacingEnv(num_reward_lines=10, randomize_start=False)
+    env.reset(seed=42)
+    # Car starts at (0, -4) with progress 0, stationary
+    _, reward, _, info = env.step(np.array([0.0, 0.0]))
+    assert info['reward_lines_crossed'] == 0
+    np.testing.assert_almost_equal(reward, np.float64(0.1))
+
+
+def test_num_reward_lines_configurable():
+    env = RacingEnv(num_reward_lines=5, randomize_start=False)
+    assert len(env._reward_line_progress) == 5
+
+    env = RacingEnv(num_reward_lines=0, randomize_start=False)
+    assert len(env._reward_line_progress) == 0
+
+
+def test_reward_line_reward_configurable():
+    env = RacingEnv(num_reward_lines=1, reward_line_reward=2.0, randomize_start=False)
+    env.reset(seed=42)
+    rp = env._reward_line_progress
+    assert len(rp) == 1
+    # Place car just before the reward line, heading east at speed
+    line_progress = rp[0]
+    track = env.track
+    # Find a position whose progress is slightly before the reward line
+    cx_before, cy_before, tangent = track.get_centerline_point(line_progress - np.float64(0.01))
+    env.state = CarState(x=cx_before, y=cy_before, heading=tangent, velocity=5.0)
+    env.current_progress = track.progress_along_centerline(cx_before, cy_before)
+    env.prev_progress = env.current_progress
+    _, reward, _, _ = env.step(np.array([0.0, 5.0]))
+    # Reward should include 0.1 base + 2.0 line + shaping
+    assert reward > np.float64(2.0)
+
+
+def test_reward_lines_reset_on_episode_reset():
+    env = RacingEnv(num_reward_lines=10, randomize_start=False)
+    env.reset(seed=42)
+    env._collected_reward_lines[[0, 1, 2]] = True
+    assert np.sum(env._collected_reward_lines) == 3
+    env.reset(seed=42)
+    assert np.sum(env._collected_reward_lines) == 0
+
+
+def test_reward_line_crossed_on_single_step():
+    env = RacingEnv(num_reward_lines=10, reward_line_reward=0.5, randomize_start=False, dt=0.1)
+    env.reset(seed=42)
+    track = env.track
+    rp = env._reward_line_progress
+    first_line = rp[0]
+    # Place car at a known position just before the first reward line
+    # Rectangular: bottom edge (0,-4)->(5,-4), progress=pos/36. first_line~0.09 → pos~3.3
+    cx_before, cy_before, tangent = track.get_centerline_point(first_line - np.float64(0.008))
+    env.state = CarState(x=cx_before, y=cy_before, heading=tangent, velocity=10.0)
+    env.current_progress = track.progress_along_centerline(cx_before, cy_before)
+    env.prev_progress = env.current_progress
+    _, reward, _, info = env.step(np.array([0.0, 10.0]))
+    assert info['reward_lines_crossed'] >= 1
+    assert reward > np.float64(0.5)
+
+
+def test_reward_line_not_crossed_going_backward():
+    env = RacingEnv(num_reward_lines=3, reward_line_reward=0.5, randomize_start=False, dt=0.1)
+    env.reset(seed=42)
+    track = env.track
+    rp = env._reward_line_progress
+    first_line = rp[0]
+    # Place car just AFTER the first reward line, heading BACKWARD
+    cx_after, cy_after, tangent = track.get_centerline_point(first_line + np.float64(0.008))
+    env.state = CarState(x=cx_after, y=cy_after, heading=tangent + np.pi, velocity=10.0)
+    env.current_progress = track.progress_along_centerline(cx_after, cy_after)
+    env.prev_progress = env.current_progress
+    _, reward, _, info = env.step(np.array([0.0, 10.0]))
+    assert info['reward_lines_crossed'] == 0
+
+
+def test_reward_lines_lap_completion_resets_collected():
+    env = RacingEnv(num_reward_lines=5, reward_line_reward=0.5, randomize_start=False, dt=0.1)
+    env.reset(seed=42)
+    track = env.track
+    env._collected_reward_lines[:] = True
+    # Place car on last segment (-5,-4)->(0,-4), just left of the start/finish line
+    env.state = CarState(x=np.float64(-0.5), y=np.float64(-4.0), heading=np.float64(0.0), velocity=10.0)
+    env.current_progress = track.progress_along_centerline(-0.5, -4.0)
+    env.prev_progress = env.current_progress
+    _, reward, _, info = env.step(np.array([0.0, 10.0]))
+    assert info['lap_count'] == 1
+    assert np.sum(env._collected_reward_lines) == 0
+
+
+def test_reward_lines_crossed_after_lap_completion():
+    env = RacingEnv(num_reward_lines=5, reward_line_reward=0.5, randomize_start=False, dt=0.1)
+    env.reset(seed=42)
+    # Place car just before start/finish at high speed
+    env.state = CarState(x=np.float64(-0.3), y=np.float64(-4.0), heading=np.float64(0.0), velocity=10.0)
+    env.current_progress = env.track.progress_along_centerline(-0.3, -4.0)
+    env.prev_progress = env.current_progress
+    _, reward, _, info = env.step(np.array([0.0, 10.0]))
+    assert info['lap_count'] == 1
+    assert np.sum(env._collected_reward_lines) == 0
+
+
+def test_info_dict_contains_reward_lines_crossed():
+    env = RacingEnv(num_reward_lines=3, randomize_start=False)
+    env.reset(seed=42)
+    _, _, _, info = env.step(np.array([0.0, 0.0]))
+    assert 'reward_lines_crossed' in info
+    assert isinstance(info['reward_lines_crossed'], (int, np.integer))

@@ -15,7 +15,7 @@ This project implements every component of a deep RL system — kinematic car ph
 - Kinematic bicycle-model car with steering, acceleration, speed limits
 - Multiple track types: rectangular, circular, figure-8
 - Configurable track width, obstacles, randomised start positions
-- Lap-based reward with progress tracking
+- Lap-based reward with progress tracking and reward lines (checkpoint gates)
 - Observation includes position, heading, velocity, distance-to-edge, heading error, and optional obstacle sensing
 
 **Agent & Algorithms:**
@@ -46,7 +46,7 @@ This project implements every component of a deep RL system — kinematic car ph
 
 The agent controls a **red car** (shown as a dot with a heading arrow) that drives on a 2D racetrack. The car uses a kinematic bicycle model — steering rotates its heading, and acceleration changes its speed. The goal is to **complete as many laps as possible** without driving off the road.
 
-Three track types are available, each with a **start/finish line** (green star marker) where the car begins and lap completion is detected:
+Three track types are available, each with a **start/finish line** (green star marker) where the car begins and lap completion is detected. Blue **reward lines** (checkpoint gates) are placed around the track — crossing one gives a bonus reward, encouraging the agent to complete the full loop:
 
 ![Environment overview](images/environment_overview.png)
 
@@ -71,6 +71,7 @@ Three track types are available, each with a **start/finish line** (green star m
 **Reward structure:**
 - **+0.1** per step while on the track
 - **+1.0** for completing a lap
+- **+0.5** per reward line (checkpoint gate) crossed
 - **-1.0** for driving off the track or colliding with an obstacle (episode ends)
 
 ## Quickstart

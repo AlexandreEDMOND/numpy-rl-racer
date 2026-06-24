@@ -90,6 +90,23 @@ class RectangularTrack:
                 return True
         return False
 
+    def get_centerline_point(self, progress):
+        target_len = progress * self._perimeter
+        cum_len = np.float64(0.0)
+        for x1, y1, x2, y2 in _centerline_edges(self.half_w, self.half_h):
+            sx = x2 - x1
+            sy = y2 - y1
+            seg_len = np.sqrt(sx * sx + sy * sy)
+            cum_next = cum_len + seg_len
+            if target_len <= cum_next:
+                t = np.float64(0.0) if seg_len == 0.0 else (target_len - cum_len) / seg_len
+                cx = x1 + t * sx
+                cy = y1 + t * sy
+                angle = np.arctan2(sy, sx)
+                return (np.float64(cx), np.float64(cy), np.float64(angle))
+            cum_len = cum_next
+        return self.start_position
+
     def centerline_info(self, x, y):
         px, py = np.float64(x), np.float64(y)
         hw, hh = self.half_w, self.half_h
@@ -158,6 +175,12 @@ class CircularTrack:
         dist = np.sqrt(px * px + py * py)
         tw2 = self.track_width / 2.0
         return (self.radius - tw2) <= dist <= (self.radius + tw2)
+
+    def get_centerline_point(self, progress):
+        theta = progress * np.float64(2.0 * np.pi)
+        x = self.radius * np.sin(theta)
+        y = -self.radius * np.cos(theta)
+        return (np.float64(x), np.float64(y), np.float64(theta))
 
     def centerline_info(self, x, y):
         px, py = np.float64(x), np.float64(y)
@@ -231,6 +254,9 @@ class Figure8Track:
         tw2 = self.track_width / np.float64(2.0)
         return min_dist <= tw2
 
+    def get_centerline_point(self, progress):
+        return self.sample_centerline_point(t=np.clip(progress, 0.0, 1.0))
+
     def centerline_info(self, x, y):
         px, py = np.float64(x), np.float64(y)
         dx = self._cs_x - px
@@ -243,7 +269,7 @@ class Figure8Track:
 
 
 class RacingEnv:
-    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None, track_type='rectangular', randomize_start=True, obstacles=None, time_penalty=0.0):
+    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None, track_type='rectangular', randomize_start=True, obstacles=None, time_penalty=0.0, num_reward_lines=10, reward_line_reward=0.5):
         if track is not None:
             self.track = track
         elif track_type == 'figure8':
@@ -261,6 +287,15 @@ class RacingEnv:
         self.lap_count = 0
         self.elapsed_time = np.float64(0.0)
         self.obstacles = obstacles if obstacles is not None else []
+        self.num_reward_lines = num_reward_lines
+        self.reward_line_reward = np.float64(reward_line_reward)
+        self._reward_line_progress = []
+        self._collected_reward_lines = np.array([], dtype=bool)
+        if num_reward_lines > 0:
+            self._reward_line_progress = list(np.linspace(
+                np.float64(0.0), np.float64(1.0), num_reward_lines + 2
+            )[1:-1])
+            self._collected_reward_lines = np.zeros(num_reward_lines, dtype=bool)
 
     @property
     def goal_position(self):
@@ -287,6 +322,7 @@ class RacingEnv:
         self.prev_progress = np.float64(0.0)
         self.lap_count = 0
         self.elapsed_time = np.float64(0.0)
+        self._collected_reward_lines[:] = False
         return self._get_observation()
 
     def step(self, action):
@@ -309,10 +345,26 @@ class RacingEnv:
             reward += np.float64(-1.0)
 
         progress_diff = self.current_progress - self.prev_progress
-        if progress_diff < -np.float64(0.5):
+        lap_completed = progress_diff < -np.float64(0.5)
+
+        # Check reward line crossings
+        for i, lp in enumerate(self._reward_line_progress):
+            if self._collected_reward_lines[i]:
+                continue
+            crossed = False
+            if self.prev_progress <= lp < self.current_progress:
+                crossed = True
+            elif lap_completed and (lp >= self.prev_progress or lp <= self.current_progress):
+                crossed = True
+            if crossed:
+                reward += self.reward_line_reward
+                self._collected_reward_lines[i] = True
+
+        if lap_completed:
             progress_diff += np.float64(1.0)
             self.lap_count += 1
             reward += np.float64(1.0)
+            self._collected_reward_lines[:] = False
         reward += np.float64(0.5) * progress_diff
 
         reward -= self.time_penalty * self.dt
@@ -322,6 +374,7 @@ class RacingEnv:
             'lap_count': self.lap_count,
             'goal_position': self.goal_position,
             'elapsed_time': self.elapsed_time,
+            'reward_lines_crossed': int(np.sum(self._collected_reward_lines)),
         }
 
         return self._get_observation(), reward, done, info
@@ -374,6 +427,17 @@ class RacingEnv:
             obs.extend([normalized_dist, normalized_angle])
 
         return np.array(obs, dtype=np.float64)
+
+
+def reward_line_endpoints(track, progress):
+    cx, cy, tangent = track.get_centerline_point(progress)
+    perp = tangent + np.pi / np.float64(2.0)
+    half_tw = track.track_width / np.float64(2.0)
+    x1 = cx - half_tw * np.cos(perp)
+    y1 = cy - half_tw * np.sin(perp)
+    x2 = cx + half_tw * np.cos(perp)
+    y2 = cy + half_tw * np.sin(perp)
+    return ((np.float64(x1), np.float64(y1)), (np.float64(x2), np.float64(y2)))
 
 
 def _centerline_edges(hw, hh):

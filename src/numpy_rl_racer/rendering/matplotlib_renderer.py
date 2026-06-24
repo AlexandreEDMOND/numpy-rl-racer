@@ -6,7 +6,7 @@ from numpy_rl_racer.env.racing_env import Figure8Track
 
 
 class MatplotlibRenderer:
-    def __init__(self, track, figsize=(8, 6), headless=False):
+    def __init__(self, track, figsize=(8, 6), headless=False, reward_line_progress=None):
         self.track = track
         self._headless = headless
         if headless:
@@ -20,6 +20,10 @@ class MatplotlibRenderer:
             self._plt = plt
             self.fig, self.ax = plt.subplots(figsize=figsize)
         self.ax.set_aspect("equal")
+        self._reward_line_endpoints = []
+        if reward_line_progress is not None:
+            from numpy_rl_racer.env.racing_env import reward_line_endpoints as _rle
+            self._reward_line_endpoints = [_rle(self.track, p) for p in reward_line_progress]
         self._compute_boundary_lines()
         self._draw_background()
         self._recording = False
@@ -86,6 +90,7 @@ class MatplotlibRenderer:
         else:
             self._draw_rectangular_background()
         self._draw_boundary_lines()
+        self._draw_reward_lines()
 
     def _draw_rectangular_background(self):
         hw = float(self.track.half_w)
@@ -180,6 +185,11 @@ class MatplotlibRenderer:
         self.ax.set_ylim(-R - margin, R + margin)
         self.ax.grid(True, alpha=0.3)
         self.ax.set_title("numpy-rl-racer")
+
+    def _draw_reward_lines(self):
+        for (x1, y1), (x2, y2) in self._reward_line_endpoints:
+            self.ax.plot([x1, x2], [y1, y2], color="#2e86c1", linewidth=1.5,
+                         linestyle="-", alpha=0.6, zorder=3)
 
     def start_recording(self):
         self._recording = True
