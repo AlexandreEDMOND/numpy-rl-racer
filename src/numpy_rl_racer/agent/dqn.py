@@ -144,7 +144,8 @@ class DQNAgent:
                  buffer_size=10000, batch_size=64, target_update_freq=100,
                  use_double_dqn=True, use_per=False, alpha=0.6, beta0=0.4,
                  beta_anneal_steps=100000, tau=0.0, seed=None,
-                 use_dueling_dqn=False, n_step=1, scheduler=None):
+                 use_dueling_dqn=False, n_step=1, scheduler=None,
+                 momentum=0.0):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
         self.rng = np.random.RandomState(seed) if seed is not None else None
@@ -155,7 +156,7 @@ class DQNAgent:
             self.online_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
             self.target_net = MLP([state_dim] + list(hidden_sizes) + [N_ACTIONS])
         self._hard_update_target()
-        self.optimizer = SGD(self.online_net, lr=lr, scheduler=scheduler)
+        self.optimizer = SGD(self.online_net, lr=lr, scheduler=scheduler, momentum=momentum)
         self.use_per = use_per
         if use_per:
             self.replay_buffer = PrioritizedReplayBuffer(buffer_size, alpha=alpha, beta0=beta0,

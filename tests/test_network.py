@@ -228,6 +228,63 @@ class TestSGDWithScheduler:
         assert opt.lr == 0.5
 
 
+class TestSGDWithMomentum:
+    def test_sgd_momentum_zero_equals_plain(self):
+        mlp = MLP([2, 4, 1])
+        rng = np.random.RandomState(42)
+        opt = SGD(mlp, lr=0.01, momentum=0.0)
+        for _ in range(5):
+            x = rng.randn(3, 2)
+            mlp.forward(x)
+            mlp.backward(rng.randn(3, 1))
+            saved = [(layer.w.copy(), layer.b.copy(), layer.grad_w.copy(), layer.grad_b.copy())
+                     for layer in mlp.layers]
+            opt.step()
+            for i, (w0, b0, gw, gb) in enumerate(saved):
+                np.testing.assert_array_equal(mlp.layers[i].w, w0 - 0.01 * gw)
+                np.testing.assert_array_equal(mlp.layers[i].b, b0 - 0.01 * gb)
+
+    def test_sgd_momentum_velocity_accumulates(self):
+        mlp = MLP([2, 4, 1])
+        rng = np.random.RandomState(42)
+        x = rng.randn(3, 2)
+        lr = 0.1
+        momentum = 0.9
+        mlp.forward(x)
+        mlp.backward(rng.randn(3, 1))
+        grad_w = [layer.grad_w.copy() for layer in mlp.layers]
+        opt = SGD(mlp, lr=lr, momentum=momentum)
+        opt.step()
+        for layer, gw in zip(mlp.layers, grad_w):
+            np.testing.assert_array_equal(opt._velocities[layer]["w"], -lr * gw)
+        v1_w = [opt._velocities[layer]["w"].copy() for layer in mlp.layers]
+        opt.step()
+        for i, layer in enumerate(mlp.layers):
+            expected = momentum * v1_w[i] - lr * grad_w[i]
+            np.testing.assert_array_equal(opt._velocities[layer]["w"], expected)
+
+    def test_sgd_momentum_separate_per_param(self):
+        mlp = MLP([2, 4, 3])
+        rng = np.random.RandomState(42)
+        x = rng.randn(3, 2)
+        mlp.forward(x)
+        mlp.backward(rng.randn(3, 3))
+        opt = SGD(mlp, lr=0.01, momentum=0.9)
+        opt.step()
+        assert len(opt._velocities) == 2
+        v0_w = opt._velocities[mlp.layers[0]]["w"]
+        v1_w = opt._velocities[mlp.layers[1]]["w"]
+        assert v0_w.shape == (2, 4)
+        assert v1_w.shape == (4, 3)
+        v0_w[:] = 999.0
+        assert not np.any(v1_w == 999.0)
+
+    def test_dqn_agent_momentum_passthrough(self):
+        from numpy_rl_racer.agent import DQNAgent
+        agent = DQNAgent(state_dim=4, hidden_sizes=[8], lr=0.01, momentum=0.9)
+        assert agent.optimizer.momentum == 0.9
+
+
 class TestLRSchedulerBase:
     def test_base_class_raises_not_implemented(self):
         sched = LRScheduler(1.0)
