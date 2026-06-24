@@ -1,7 +1,7 @@
 import numpy as np
 
 from numpy_rl_racer.env.car import CarState
-from numpy_rl_racer.env.racing_env import CircularTrack, RacingEnv, RectangularTrack
+from numpy_rl_racer.env.racing_env import CircularTrack, Obstacle, RacingEnv, RectangularTrack
 
 
 def test_reset_returns_numpy_observation():
@@ -418,3 +418,100 @@ def test_randomized_start_on_track_circular():
         assert env.track.is_on_track(env.state.x, env.state.y), (
             f"Start position ({env.state.x}, {env.state.y}) with seed {seed} is off track"
         )
+
+
+# ── Obstacles ────────────────────────────────────────────────────────
+
+
+def test_default_no_obstacles_backward_compatible():
+    env = RacingEnv()
+    assert len(env.obstacles) == 0, "Default should have no obstacles for backward compat"
+
+
+def test_custom_obstacles_list():
+    obstacles = [Obstacle(x=1.0, y=2.0, radius=0.5)]
+    env = RacingEnv(obstacles=obstacles)
+    assert len(env.obstacles) == 1
+    assert isinstance(env.obstacles[0], Obstacle)
+
+
+def test_obstacles_deterministic_with_seed():
+    obstacles = [Obstacle(x=1.0, y=1.0, radius=0.5)]
+    env = RacingEnv(obstacles=obstacles)
+    env.reset(seed=123)
+    obs1 = env._get_observation()
+    env.reset(seed=123)
+    obs2 = env._get_observation()
+    np.testing.assert_array_equal(obs1, obs2)
+
+
+def test_obstacle_collision_ends_episode():
+    env = RacingEnv(obstacles=[Obstacle(x=1.0, y=-3.0, radius=0.5)])
+    env.reset(seed=42)
+    env.state = CarState(x=0.0, y=-3.5, heading=np.pi / 2, velocity=2.0)
+    done = False
+    for _ in range(10):
+        obs, reward, done, info = env.step(np.array([0.0, 5.0]))
+        if done:
+            break
+    assert done, "Car should collide with obstacle when driving toward it"
+
+
+def test_obstacle_collision_gives_negative_reward():
+    env = RacingEnv(obstacles=[Obstacle(x=1.0, y=-3.0, radius=0.5)])
+    env.reset(seed=42)
+    env.state = CarState(x=0.0, y=-3.5, heading=np.pi / 2, velocity=2.0)
+    collided = False
+    for _ in range(10):
+        obs, reward, done, info = env.step(np.array([0.0, 5.0]))
+        if done:
+            collided = True
+            assert reward < -0.5, (
+                f"Expected negative reward on collision, got {reward}"
+            )
+            break
+    assert collided
+
+
+def test_no_obstacle_observation_is_6d():
+    env = RacingEnv(obstacles=[])
+    obs = env.reset(seed=42)
+    assert obs.shape == (6,), f"Expected 6-dim obs without obstacles, got {obs.shape}"
+
+
+def test_with_obstacles_observation_is_8d():
+    env = RacingEnv(obstacles=[Obstacle(x=1.0, y=1.0, radius=0.5)])
+    obs = env.reset(seed=42)
+    assert obs.shape == (8,), f"Expected 8-dim obs with obstacles, got {obs.shape}"
+
+
+def test_observation_obstacle_features_within_bounds():
+    env = RacingEnv(obstacles=[Obstacle(x=1.0, y=1.0, radius=0.5)])
+    obs = env.reset(seed=42)
+    # normalized distance should be in [0, 1]
+    assert 0.0 <= obs[6] <= 1.0, f"Obstacle distance out of bounds: {obs[6]}"
+    # normalized angle should be in [-1, 1]
+    assert -1.0 <= obs[7] <= 1.0, f"Obstacle angle out of bounds: {obs[7]}"
+
+
+def test_obstacle_observation_with_circular_track():
+    track = CircularTrack(radius=6.0, track_width=2.0)
+    env = RacingEnv(track=track, obstacles=[Obstacle(x=0.0, y=0.0, radius=0.5)])
+    obs = env.reset(seed=42)
+    assert obs.shape == (8,)
+    assert 0.0 <= obs[6] <= 1.0
+    assert -1.0 <= obs[7] <= 1.0
+
+
+def test_collision_no_false_positive_when_far():
+    env = RacingEnv(obstacles=[Obstacle(x=100.0, y=100.0, radius=0.5)])
+    env.reset(seed=42)
+    for _ in range(10):
+        obs, reward, done, info = env.step(np.array([0.0, 2.0]))
+        assert not done, "Car should not collide with distant obstacle"
+
+
+def test_empty_obstacles_list_backward_compatible():
+    env = RacingEnv(obstacles=[])
+    obs = env.reset(seed=42)
+    assert obs.shape == (6,), "No obstacles should give 6-dim observation"

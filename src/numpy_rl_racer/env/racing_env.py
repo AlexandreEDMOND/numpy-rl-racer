@@ -1,7 +1,19 @@
+from dataclasses import dataclass
+
 import numpy as np
 
 from .car import CarState, KinematicCar
 from .utils import normalize_angle
+
+
+@dataclass
+class Obstacle:
+    x: float
+    y: float
+    radius: float = 0.5
+
+
+CAR_COLLISION_RADIUS = 0.3
 
 
 class RectangularTrack:
@@ -156,7 +168,7 @@ class CircularTrack:
 
 
 class RacingEnv:
-    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None, randomize_start=True):
+    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None, randomize_start=True, obstacles=None):
         if track is not None:
             self.track = track
         else:
@@ -168,6 +180,7 @@ class RacingEnv:
         self.current_progress = np.float64(0.0)
         self.prev_progress = np.float64(0.0)
         self.lap_count = 0
+        self.obstacles = obstacles if obstacles is not None else []
 
     @property
     def goal_position(self):
@@ -204,10 +217,16 @@ class RacingEnv:
         on_track = self.track.is_on_track(self.state.x, self.state.y)
         done = not on_track
 
+        obstacle_collision = self._check_obstacle_collision()
+        if obstacle_collision:
+            done = True
+
         self.prev_progress = self.current_progress
         self.current_progress = self.track.progress_along_centerline(self.state.x, self.state.y)
 
         reward = np.float64(0.1 if on_track else -1.0)
+        if obstacle_collision:
+            reward += np.float64(-1.0)
         reward += np.float64(0.5) * (prev_dist - new_dist) / self.track.track_width
 
         if self.current_progress < self.prev_progress - np.float64(0.5):
@@ -222,6 +241,15 @@ class RacingEnv:
 
         return self._get_observation(), reward, done, info
 
+    def _check_obstacle_collision(self):
+        for obs in self.obstacles:
+            dx = self.state.x - obs.x
+            dy = self.state.y - obs.y
+            dist = np.sqrt(dx * dx + dy * dy)
+            if dist < CAR_COLLISION_RADIUS + obs.radius:
+                return True
+        return False
+
     def _get_observation(self):
         dist_to_centerline, tangent_angle = self.track.centerline_info(
             self.state.x, self.state.y
@@ -232,17 +260,35 @@ class RacingEnv:
             dist_to_edge / half_tw, np.float64(0.0), np.float64(1.0)
         )
         heading_error = normalize_angle(self.state.heading - tangent_angle)
-        return np.array(
-            [
-                self.state.x,
-                self.state.y,
-                self.state.heading,
-                self.state.velocity,
-                dist_to_edge_normalized,
-                heading_error,
-            ],
-            dtype=np.float64,
-        )
+
+        obs = [
+            self.state.x,
+            self.state.y,
+            self.state.heading,
+            self.state.velocity,
+            dist_to_edge_normalized,
+            heading_error,
+        ]
+
+        if self.obstacles:
+            nearest_dist = np.inf
+            nearest_angle = np.float64(0.0)
+            for obs_obj in self.obstacles:
+                dx = obs_obj.x - self.state.x
+                dy = obs_obj.y - self.state.y
+                dist = np.sqrt(dx * dx + dy * dy)
+                angle = normalize_angle(np.arctan2(dy, dx) - self.state.heading)
+                if dist < nearest_dist:
+                    nearest_dist = dist
+                    nearest_angle = angle
+            max_dist = np.float64(
+                self.track.half_w + self.track.half_h + self.track.track_width
+            )
+            normalized_dist = np.clip(nearest_dist / max_dist, 0.0, 1.0)
+            normalized_angle = nearest_angle / np.pi
+            obs.extend([normalized_dist, normalized_angle])
+
+        return np.array(obs, dtype=np.float64)
 
 
 def _centerline_edges(hw, hh):
@@ -262,6 +308,27 @@ def _rectangle_edges(hw, hh):
         (hw, hh, -hw, hh),
         (-hw, hh, -hw, -hh),
     ]
+
+
+def _default_obstacles(track):
+    if hasattr(track, 'radius'):
+        R = float(track.radius)
+        obstacles = [
+            Obstacle(0.0, 0.0, 0.5),
+            Obstacle(R * 0.35, R * 0.35, 0.45),
+            Obstacle(-R * 0.35, -R * 0.35, 0.4),
+        ]
+    else:
+        hw = float(track.half_w)
+        hh = float(track.half_h)
+        inner_hw = hw - track.track_width
+        inner_hh = hh - track.track_width
+        obstacles = [
+            Obstacle(0.0, 0.0, 0.5),
+            Obstacle(inner_hw * 0.6, -inner_hh * 0.4, 0.45),
+            Obstacle(-inner_hw * 0.5, inner_hh * 0.5, 0.4),
+        ]
+    return obstacles
 
 
 def _point_to_segment_dist(px, py, x1, y1, x2, y2):

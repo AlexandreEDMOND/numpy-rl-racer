@@ -1,9 +1,14 @@
-from numpy_rl_racer.env import RacingEnv
+from numpy_rl_racer.env import Obstacle, RacingEnv
 from numpy_rl_racer.rendering import MatplotlibRenderer
 
 
 def main():
-    env = RacingEnv()
+    obstacles = [
+        Obstacle(x=1.5, y=-2.0, radius=0.5),
+        Obstacle(x=-1.0, y=1.5, radius=0.4),
+        Obstacle(x=3.0, y=2.0, radius=0.45),
+    ]
+    env = RacingEnv(obstacles=obstacles)
     env.reset(seed=0)
     renderer = MatplotlibRenderer(env.track)
 
@@ -15,10 +20,11 @@ def main():
         [0.5, 2.0],
     ]
 
-    print("Running demo...")
+    print("Running demo with obstacles...")
     for i, action in enumerate(actions):
         obs, reward, done, _ = env.step(action)
-        renderer.render(env.state, step=i + 1, reward=reward)
+        print(f"  obs dim={len(obs)}")
+        renderer.render(env.state, step=i + 1, reward=reward, obstacles=env.obstacles)
         print(f"  step={i + 1:2d}  x={env.state.x:6.2f}  y={env.state.y:6.2f}  "
               f"heading={env.state.heading:5.2f}  reward={reward:5.2f}")
         if done:
