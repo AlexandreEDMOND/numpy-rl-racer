@@ -121,9 +121,21 @@ class MatplotlibRenderer:
         self.ax.grid(True, alpha=0.3)
         self.ax.set_title("numpy-rl-racer")
 
-    def render(self, state, step=None, reward=None):
+    def render(self, state, step=None, reward=None, obstacles=None):
         self.ax.clear()
         self._draw_background()
+
+        if obstacles:
+            for obs in obstacles:
+                circle = mpatches.Circle(
+                    (float(obs.x), float(obs.y)),
+                    float(obs.radius),
+                    facecolor="#e74c3c",
+                    edgecolor="#c0392b",
+                    linewidth=1.5,
+                    zorder=4,
+                )
+                self.ax.add_patch(circle)
 
         self.ax.plot(float(state.x), float(state.y), "o", color="red", markersize=8, zorder=5)
 
