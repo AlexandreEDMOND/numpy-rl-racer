@@ -6,7 +6,7 @@ from contextlib import nullcontext
 import numpy as np
 
 from numpy_rl_racer.agent import DQNAgent, ACTIONS
-from numpy_rl_racer.env import CircularTrack, Obstacle, RacingEnv, RectangularTrack
+from numpy_rl_racer.env import CircularTrack, Figure8Track, Obstacle, RacingEnv, RectangularTrack
 from numpy_rl_racer.utils.scheduler import ExponentialDecay, StepDecay
 
 
@@ -98,7 +98,7 @@ def main(argv=None):
     parser.add_argument("--save-dir", default="models", help="Directory to save model parameters")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
     parser.add_argument("--log-dir", default=None, help="Directory to save training log CSV")
-    parser.add_argument("--track", choices=["rectangular", "circular"], default="rectangular",
+    parser.add_argument("--track", choices=["rectangular", "circular", "figure8"], default="rectangular",
                         help="Track type to use (default: rectangular)")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
@@ -157,6 +157,8 @@ def main(argv=None):
 
     if args.track == "circular":
         track = CircularTrack(radius=6.0, track_width=2.0)
+    elif args.track == "figure8":
+        track = Figure8Track(radius=6.0, track_width=2.0)
     else:
         track = RectangularTrack(width=10.0, height=8.0, track_width=2.0)
 
