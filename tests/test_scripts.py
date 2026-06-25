@@ -15,10 +15,14 @@ from numpy_rl_racer.env import CircularTrack, Obstacle, RacingEnv, RectangularTr
 
 def _parse_track(args=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--track", choices=["rectangular", "circular"], default="rectangular")
+    parser.add_argument("--track", choices=["rectangular", "circular", "figure8"], default="rectangular")
     parsed = parser.parse_args(args)
     if parsed.track == "circular":
         track = CircularTrack(radius=6.0, track_width=2.0)
+        return RacingEnv(track=track), parsed.track
+    elif parsed.track == "figure8":
+        from numpy_rl_racer.env.racing_env import Figure8Track
+        track = Figure8Track(radius=6.0, track_width=2.0)
         return RacingEnv(track=track), parsed.track
     else:
         return RacingEnv(), parsed.track
@@ -40,6 +44,28 @@ def test_circular_track():
     env, track_type = _parse_track(["--track", "circular"])
     assert track_type == "circular"
     assert isinstance(env.track, CircularTrack)
+
+
+def test_figure8_track():
+    env, track_type = _parse_track(["--track", "figure8"])
+    assert track_type == "figure8"
+    from numpy_rl_racer.env.racing_env import Figure8Track
+    assert isinstance(env.track, Figure8Track)
+
+
+def test_train_figure8_runs(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--track", "figure8",
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    config_path = os.path.join(tmp_path, "config.json")
+    assert os.path.exists(config_path)
 
 
 def _parse_log_dir(args=None):
