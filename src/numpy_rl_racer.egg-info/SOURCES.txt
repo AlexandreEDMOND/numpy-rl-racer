@@ -12,7 +12,6 @@ src/numpy_rl_racer/env/__init__.py
 src/numpy_rl_racer/env/car.py
 src/numpy_rl_racer/env/racing_env.py
 src/numpy_rl_racer/env/utils.py
-src/numpy_rl_racer/env/wrappers.py
 src/numpy_rl_racer/network/__init__.py
 src/numpy_rl_racer/network/network.py
 src/numpy_rl_racer/rendering/__init__.py
@@ -30,4 +29,3 @@ tests/test_racing_env.py
 tests/test_renderer.py
 tests/test_scripts.py
 tests/test_utils.py
-tests/test_wrappers.py
