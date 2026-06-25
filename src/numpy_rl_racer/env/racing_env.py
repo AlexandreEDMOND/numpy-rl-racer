@@ -269,7 +269,7 @@ class Figure8Track:
 
 
 class RacingEnv:
-    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None, track_type='rectangular', randomize_start=True, obstacles=None, time_penalty=0.0, num_reward_lines=10, reward_line_reward=0.5):
+    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None, track_type='rectangular', randomize_start=True, obstacles=None, time_penalty=0.0, num_reward_lines=10, reward_line_reward=0.5, use_lidar=False, num_lidar_rays=8, lidar_max_range=10.0):
         if track is not None:
             self.track = track
         elif track_type == 'figure8':
@@ -296,6 +296,12 @@ class RacingEnv:
                 np.float64(0.0), np.float64(1.0), num_reward_lines + 2
             )[1:-1])
             self._collected_reward_lines = np.zeros(num_reward_lines, dtype=bool)
+
+        self.use_lidar = use_lidar
+        self.num_lidar_rays = num_lidar_rays
+        self.lidar_max_range = np.float64(lidar_max_range)
+        self._lidar_angles = np.linspace(0, 2 * np.pi, num_lidar_rays, endpoint=False).astype(np.float64)
+        self._lidar_boundary_segments = self._compute_lidar_boundary_segments()
 
     @property
     def goal_position(self):
@@ -388,6 +394,102 @@ class RacingEnv:
                 return True
         return False
 
+    def _compute_lidar_boundary_segments(self):
+        if not self.use_lidar:
+            return np.empty((0, 2, 2), dtype=np.float64)
+
+        segments = []
+
+        if isinstance(self.track, RectangularTrack):
+            hw, hh = self.track.half_w, self.track.half_h
+            edges = _centerline_edges(hw, hh)
+            tw2 = self.track.track_width / np.float64(2.0)
+
+            left_ends = []
+            right_ends = []
+            for (x1, y1, x2, y2) in edges:
+                dx = x2 - x1
+                dy = y2 - y1
+                length = np.sqrt(dx * dx + dy * dy)
+                if length == 0:
+                    continue
+                px = -dy / length
+                py = dx / length
+                ls = (x1 + px * tw2, y1 + py * tw2)
+                le = (x2 + px * tw2, y2 + py * tw2)
+                rs = (x1 - px * tw2, y1 - py * tw2)
+                re = (x2 - px * tw2, y2 - py * tw2)
+                left_ends.append((ls, le))
+                right_ends.append((rs, re))
+                segments.append((ls, le))
+                segments.append((rs, re))
+
+            n = len(edges)
+            for i in range(n):
+                j = (i + 1) % n
+                segments.append((right_ends[i][1], right_ends[j][0]))
+                segments.append((left_ends[i][1], left_ends[j][0]))
+
+        elif isinstance(self.track, Figure8Track):
+            n = self.track._n
+            cs_x = self.track._cs_x
+            cs_y = self.track._cs_y
+            tangents = self.track._cs_tangents
+            tw2 = self.track.track_width / np.float64(2.0)
+
+            px_arr = -np.sin(tangents) * tw2
+            py_arr = np.cos(tangents) * tw2
+            left_x = cs_x + px_arr
+            left_y = cs_y + py_arr
+            right_x = cs_x - px_arr
+            right_y = cs_y - py_arr
+
+            for i in range(n - 1):
+                segments.append(((left_x[i], left_y[i]), (left_x[i + 1], left_y[i + 1])))
+                segments.append(((right_x[i], right_y[i]), (right_x[i + 1], right_y[i + 1])))
+
+        return np.array(segments, dtype=np.float64)
+
+    def _lidar_readings(self):
+        origin = np.array([self.state.x, self.state.y], dtype=np.float64)
+        heading = self.state.heading
+        angles = self._lidar_angles + heading
+        dirs = np.column_stack([np.cos(angles), np.sin(angles)])
+
+        num_rays = self.num_lidar_rays
+        max_range = self.lidar_max_range
+        min_dists = np.full(num_rays, max_range, dtype=np.float64)
+
+        # Track boundary intersection
+        if isinstance(self.track, CircularTrack):
+            R = self.track.radius
+            tw2 = self.track.track_width / np.float64(2.0)
+            for cr in [R - tw2, R + tw2]:
+                if cr > 0:
+                    for i in range(num_rays):
+                        d = _ray_circle_intersection_distance(origin, dirs[i], np.zeros(2, dtype=np.float64), cr)
+                        if d < min_dists[i]:
+                            min_dists[i] = d
+        else:
+            segments = self._lidar_boundary_segments
+            n_seg = len(segments)
+            if n_seg > 0:
+                for i in range(num_rays):
+                    d_vec = _ray_segments_distances_vector(origin, dirs[i], segments)
+                    if d_vec < min_dists[i]:
+                        min_dists[i] = d_vec
+
+        # Obstacle intersection
+        for obs in self.obstacles:
+            center = np.array([obs.x, obs.y], dtype=np.float64)
+            r = obs.radius
+            for i in range(num_rays):
+                d = _ray_circle_intersection_distance(origin, dirs[i], center, r)
+                if d < min_dists[i]:
+                    min_dists[i] = d
+
+        return np.clip(min_dists / max_range, np.float64(0.0), np.float64(1.0))
+
     def _get_observation(self):
         dist_to_centerline, tangent_angle = self.track.centerline_info(
             self.state.x, self.state.y
@@ -408,7 +510,9 @@ class RacingEnv:
             heading_error,
         ]
 
-        if self.obstacles:
+        if self.use_lidar:
+            obs.extend(self._lidar_readings().tolist())
+        elif self.obstacles:
             nearest_dist = np.inf
             nearest_angle = np.float64(0.0)
             for obs_obj in self.obstacles:
@@ -478,6 +582,67 @@ def _default_obstacles(track):
             Obstacle(-inner_hw * 0.5, inner_hh * 0.5, 0.4),
         ]
     return obstacles
+
+
+def _ray_segment_intersection_distance(origin, direction, p1, p2):
+    o = np.asarray(origin, dtype=np.float64)
+    d = np.asarray(direction, dtype=np.float64)
+    a = np.asarray(p1, dtype=np.float64)
+    b = np.asarray(p2, dtype=np.float64)
+    seg_dir = b - a
+    cross_d_seg = d[0] * seg_dir[1] - d[1] * seg_dir[0]
+    if abs(cross_d_seg) < 1e-12:
+        return np.inf
+    w = o - a
+    t = (w[0] * seg_dir[1] - w[1] * seg_dir[0]) / cross_d_seg
+    if t <= 1e-12:
+        return np.inf
+    s = (d[0] * w[1] - d[1] * w[0]) / cross_d_seg
+    if s < 0.0 or s > 1.0:
+        return np.inf
+    return t
+
+
+def _ray_segments_distances_vector(origin, direction, segments):
+    o = np.asarray(origin, dtype=np.float64)
+    d = np.asarray(direction, dtype=np.float64)
+    a = np.asarray(segments[:, 0, :], dtype=np.float64)
+    b = np.asarray(segments[:, 1, :], dtype=np.float64)
+    seg_dirs = b - a
+    cross_d_seg = d[0] * seg_dirs[:, 1] - d[1] * seg_dirs[:, 0]
+    parallel = np.abs(cross_d_seg) < 1e-12
+    w = o - a
+    t = np.full(len(segments), np.inf, dtype=np.float64)
+    s = np.full(len(segments), -1.0, dtype=np.float64)
+    nz = ~parallel
+    if np.any(nz):
+        t[nz] = (w[nz, 0] * seg_dirs[nz, 1] - w[nz, 1] * seg_dirs[nz, 0]) / cross_d_seg[nz]
+        s[nz] = (d[0] * w[nz, 1] - d[1] * w[nz, 0]) / cross_d_seg[nz]
+    valid = nz & (t > 1e-12) & (s >= 0.0) & (s <= 1.0)
+    if np.any(valid):
+        return np.min(t[valid])
+    return np.inf
+
+
+def _ray_circle_intersection_distance(origin, direction, center, radius):
+    o = np.asarray(origin, dtype=np.float64)
+    d = np.asarray(direction, dtype=np.float64)
+    c = np.asarray(center, dtype=np.float64)
+    e = o - c
+    ed = e[0] * d[0] + e[1] * d[1]
+    e_sq = e[0] * e[0] + e[1] * e[1]
+    r_sq = radius * radius
+    disc = ed * ed - e_sq + r_sq
+    if disc < 0.0:
+        return np.inf
+    sqrt_disc = np.sqrt(disc)
+    t1 = -ed - sqrt_disc
+    t2 = -ed + sqrt_disc
+    if t1 > 1e-12:
+        return t1
+    if t2 > 1e-12:
+        return t2
+    return np.inf
 
 
 def _point_to_segment_dist(px, py, x1, y1, x2, y2):

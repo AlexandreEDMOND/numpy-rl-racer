@@ -920,3 +920,252 @@ def test_info_dict_contains_reward_lines_crossed():
     _, _, _, info = env.step(np.array([0.0, 0.0]))
     assert 'reward_lines_crossed' in info
     assert isinstance(info['reward_lines_crossed'], (int, np.integer))
+
+
+# ── Lidar ─────────────────────────────────────────────────────────────
+
+
+def test_lidar_disabled_by_default():
+    env = RacingEnv()
+    obs = env.reset(seed=42)
+    assert obs.shape == (6,), "Observation should be 6D when lidar is disabled"
+
+
+def test_lidar_disabled_observation_identical():
+    env_no = RacingEnv(use_lidar=False, obstacles=[])
+    env_no.reset(seed=42)
+    obs_no = env_no._get_observation()
+    env_no.reset(seed=42)
+    obs_no2 = env_no._get_observation()
+    np.testing.assert_array_equal(obs_no, obs_no2)
+
+
+def test_lidar_enabled_shape():
+    for num_rays in [4, 8, 16, 32]:
+        env = RacingEnv(use_lidar=True, num_lidar_rays=num_rays)
+        obs = env.reset(seed=42)
+        assert obs.shape == (6 + num_rays,), (
+            f"Expected shape {(6 + num_rays,)}, got {obs.shape}"
+        )
+        assert obs.dtype == np.float64, f"Expected float64, got {obs.dtype}"
+
+
+def test_lidar_readings_finite_and_in_range():
+    env = RacingEnv(use_lidar=True, num_lidar_rays=8)
+    obs = env.reset(seed=42)
+    lidar = obs[6:]
+    assert np.all(np.isfinite(lidar)), "Lidar readings should be finite"
+    assert np.all(lidar >= 0.0) and np.all(lidar <= 1.0), (
+        f"Lidar readings should be in [0, 1], got range [{lidar.min()}, {lidar.max()}]"
+    )
+
+
+def test_lidar_straight_section_rectangular():
+    hw, hh = 5.0, 4.0
+    tw = 2.0
+    env = RacingEnv(
+        track=RectangularTrack(width=2 * hw, height=2 * hh, track_width=tw),
+        use_lidar=True, num_lidar_rays=8,
+    )
+    env.reset(seed=42)
+    # Place car at center of bottom edge, heading right
+    from numpy_rl_racer.env.car import CarState
+    env.state = CarState(x=2.0, y=-hh, heading=0.0, velocity=0.0)
+    obs = env._get_observation()
+    lidar = obs[6:]
+    half_tw = tw / 2.0
+    expected = half_tw  # 1.0
+
+    # Ray angles: 0°, 45°, 90°, 135°, 180°, 225°, 270°, 315°
+    # At angle 90° (π/2, pointing up/inward): should see inner boundary at half_tw
+    idx_up = 2  # 90° = π/2
+    np.testing.assert_almost_equal(
+        lidar[idx_up], expected / 10.0, decimal=5,
+        err_msg="Upward ray should see inner boundary at half_tw"
+    )
+    # At angle 270° (3π/2, pointing down/outward): should see outer boundary at half_tw
+    idx_down = 6  # 270° = 3π/2
+    np.testing.assert_almost_equal(
+        lidar[idx_down], expected / 10.0, decimal=5,
+        err_msg="Downward ray should see outer boundary at half_tw"
+    )
+
+
+def test_lidar_symmetry_straight_section():
+    hw, hh = 5.0, 4.0
+    tw = 2.0
+    env = RacingEnv(
+        track=RectangularTrack(width=2 * hw, height=2 * hh, track_width=tw),
+        use_lidar=True, num_lidar_rays=8,
+    )
+    env.reset(seed=42)
+    from numpy_rl_racer.env.car import CarState
+    env.state = CarState(x=2.0, y=-hh, heading=0.0, velocity=0.0)
+    obs = env._get_observation()
+    lidar = obs[6:]
+
+    # Ray 1 (45°) and ray 7 (315°) should be symmetric
+    np.testing.assert_almost_equal(
+        lidar[1], lidar[7], decimal=5,
+        err_msg="Left and right forward rays should be symmetric"
+    )
+    # Ray 3 (135°) and ray 5 (225°) should be symmetric
+    np.testing.assert_almost_equal(
+        lidar[3], lidar[5], decimal=5,
+        err_msg="Left and right backward rays should be symmetric"
+    )
+
+
+def test_lidar_obstacle_detection():
+    env = RacingEnv(
+        use_lidar=True, num_lidar_rays=8, lidar_max_range=10.0,
+        obstacles=[Obstacle(x=3.0, y=-4.0, radius=0.5)],
+    )
+    env.reset(seed=42)
+    from numpy_rl_racer.env.car import CarState
+    # Car at (0, -4) heading right (0 rad)
+    env.state = CarState(x=0.0, y=-4.0, heading=0.0, velocity=0.0)
+    obs = env._get_observation()
+    lidar = obs[6:]
+
+    # Obstacle at (3, -4), ray at angle 0° (forward/right)
+    # Distance = 3.0, minus obstacle radius 0.5 = 2.5
+    # Normalized = min(2.5, 10.0) / 10.0 = 0.25
+    idx_fwd = 0  # 0°
+    expected_dist = 3.0 - 0.5  # distance from car to obstacle center minus radius
+    expected_normalized = expected_dist / 10.0
+    assert lidar[idx_fwd] <= expected_normalized + 0.05, (
+        f"Forward ray should detect obstacle at ~{expected_normalized:.3f}, "
+        f"got {lidar[idx_fwd]:.3f}"
+    )
+
+
+def test_lidar_obstacle_detection_known_position():
+    env = RacingEnv(
+        use_lidar=True, num_lidar_rays=16, lidar_max_range=10.0,
+        obstacles=[Obstacle(x=2.0, y=-3.0, radius=0.4)],
+    )
+    env.reset(seed=42)
+    from numpy_rl_racer.env.car import CarState
+    # Car at (0, -3), heading right
+    env.state = CarState(x=0.0, y=-3.0, heading=0.0, velocity=0.0)
+    obs = env._get_observation()
+    lidar = obs[6:]
+
+    # Obstacle at (2, -3), ray at 0° → distance 2.0 - 0.4 = 1.6
+    expected = np.clip((2.0 - 0.4) / 10.0, 0.0, 1.0)
+    idx_fwd = 0
+    np.testing.assert_almost_equal(
+        lidar[idx_fwd], expected, decimal=3,
+        err_msg="Ray at 0° should detect obstacle at exact distance"
+    )
+
+
+def test_lidar_max_range_clipping():
+    env = RacingEnv(
+        use_lidar=True, num_lidar_rays=4, lidar_max_range=10.0,
+    )
+    env.reset(seed=42)
+    from numpy_rl_racer.env.car import CarState
+    env.state = CarState(x=0.0, y=-4.0, heading=0.0, velocity=0.0)
+    obs = env._get_observation()
+    lidar = obs[6:]
+
+    # Ray pointing right (0°) along the road — max distance is bounded by track but
+    # should be finite and in [0, 1]
+    assert 0.0 <= lidar[0] <= 1.0
+
+
+def test_lidar_use_lidar_false_regression():
+    env_base = RacingEnv(obstacles=[])
+    env_lidar_disabled = RacingEnv(use_lidar=False, obstacles=[])
+
+    for seed in [0, 1, 42, 123]:
+        obs_base = env_base.reset(seed=seed)
+        obs_disabled = env_lidar_disabled.reset(seed=seed)
+        np.testing.assert_array_equal(
+            obs_base, obs_disabled,
+            err_msg=f"Seed {seed}: use_lidar=False should match default env"
+        )
+
+
+def test_lidar_all_track_types():
+    track_types = [
+        ('rectangular', None),
+        ('circular', None),
+        ('figure8', None),
+    ]
+    for track_type, _ in track_types:
+        env = RacingEnv(
+            track_type=track_type,
+            use_lidar=True, num_lidar_rays=8, lidar_max_range=10.0,
+        )
+        obs = env.reset(seed=42)
+        lidar = obs[6:]
+        assert np.all(np.isfinite(lidar)), (
+            f"Lidar readings should be finite for {track_type} track"
+        )
+        assert np.all(lidar >= 0.0) and np.all(lidar <= 1.0), (
+            f"Lidar readings should be in [0, 1] for {track_type} track, "
+            f"got [{lidar.min()}, {lidar.max()}]"
+        )
+
+
+def test_lidar_deterministic_with_seed():
+    env = RacingEnv(use_lidar=True, num_lidar_rays=8)
+    obs1 = env.reset(seed=123)
+    obs2 = env.reset(seed=123)
+    np.testing.assert_array_equal(obs1, obs2)
+
+
+def test_lidar_with_obstacles_all_track_types():
+    for track_type in ['rectangular', 'circular', 'figure8']:
+        env = RacingEnv(
+            track_type=track_type,
+            use_lidar=True, num_lidar_rays=8, lidar_max_range=10.0,
+            obstacles=[Obstacle(x=2.0, y=0.0, radius=0.5)],
+        )
+        obs = env.reset(seed=42)
+        lidar = obs[6:]
+        assert np.all(np.isfinite(lidar)), (
+            f"Lidar readings should be finite for {track_type} track with obstacles"
+        )
+        assert np.all(lidar >= 0.0) and np.all(lidar <= 1.0)
+
+
+def test_lidar_step_does_not_crash():
+    env = RacingEnv(use_lidar=True, num_lidar_rays=8, lidar_max_range=10.0)
+    env.reset(seed=42)
+    for _ in range(20):
+        obs, reward, done, info = env.step(np.array([0.0, 2.0]))
+        assert obs.shape == (6 + 8,), f"Obs shape should be 14, got {obs.shape}"
+        assert np.all(np.isfinite(obs))
+        if done:
+            break
+
+
+def test_lidar_step_with_obstacles():
+    env = RacingEnv(
+        use_lidar=True, num_lidar_rays=8, lidar_max_range=10.0,
+        obstacles=[Obstacle(x=3.0, y=-3.0, radius=0.5)],
+    )
+    env.reset(seed=42)
+    for _ in range(10):
+        obs, reward, done, info = env.step(np.array([0.0, 2.0]))
+        assert obs.shape[0] >= 6 + 8, "Observation should include lidar readings"
+        assert np.all(np.isfinite(obs))
+        if done:
+            break
+
+
+def test_lidar_zero_rays():
+    env = RacingEnv(use_lidar=True, num_lidar_rays=0)
+    obs = env.reset(seed=42)
+    assert obs.shape == (6,), "With 0 lidar rays, observation should be 6D"
+
+
+def test_lidar_single_ray():
+    env = RacingEnv(use_lidar=True, num_lidar_rays=1)
+    obs = env.reset(seed=42)
+    assert obs.shape == (7,), "With 1 lidar ray, observation should be 7D"
+    assert 0.0 <= obs[6] <= 1.0
