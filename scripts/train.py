@@ -139,6 +139,12 @@ def main(argv=None):
                         help="Number of obstacles to place on the track (default: 0)")
     parser.add_argument("--obstacle-seed", type=int, default=None,
                         help="Seed for reproducible obstacle placement (default: None)")
+    parser.add_argument("--use-lidar", action="store_true",
+                        help="Enable lidar ray-casting distance sensors")
+    parser.add_argument("--num-lidar-rays", type=int, default=8,
+                        help="Number of lidar rays (default: 8)")
+    parser.add_argument("--lidar-max-range", type=float, default=10.0,
+                        help="Maximum range of lidar rays (default: 10.0)")
 
     known_args, _ = parser.parse_known_args(argv)
     if known_args.config:
@@ -168,7 +174,9 @@ def main(argv=None):
         print(f"Generated {len(obstacles)} obstacles (seed={args.obstacle_seed})")
 
     env = RacingEnv(track=track, randomize_start=args.randomize_start,
-                    time_penalty=args.time_penalty, obstacles=obstacles)
+                    time_penalty=args.time_penalty, obstacles=obstacles,
+                    use_lidar=args.use_lidar, num_lidar_rays=args.num_lidar_rays,
+                    lidar_max_range=args.lidar_max_range)
 
     print(f"Track type: {args.track}")
     scheduler = None
@@ -176,7 +184,12 @@ def main(argv=None):
         scheduler = ExponentialDecay(args.lr, args.lr_decay)
     elif args.lr_scheduler == "step":
         scheduler = StepDecay(args.lr, args.lr_decay, args.lr_drop_every)
-    state_dim = 8 if obstacles else 6
+    if args.use_lidar:
+        state_dim = 6 + args.num_lidar_rays
+    elif obstacles:
+        state_dim = 8
+    else:
+        state_dim = 6
     agent = DQNAgent(
         state_dim=state_dim,
         hidden_sizes=args.hidden_sizes,

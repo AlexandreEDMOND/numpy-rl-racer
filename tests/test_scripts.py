@@ -730,6 +730,81 @@ def test_obstacles_config_keys(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Lidar tests
+# ---------------------------------------------------------------------------
+
+
+def test_train_with_lidar(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--use-lidar", "--num-lidar-rays", "4",
+            "--episodes", "1", "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+
+def test_train_with_lidar_state_dim(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--use-lidar", "--num-lidar-rays", "8",
+            "--episodes", "1", "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    assert captured[0]["state_dim"] == 14  # 6 + 8
+
+
+def test_train_with_lidar_and_obstacles(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--use-lidar", "--num-lidar-rays", "4",
+            "--num-obstacles", "2", "--obstacle-seed", "0",
+            "--episodes", "1", "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    # Lidar subsumes hand-crafted obstacle features, so state_dim = 6 + 4 = 10
+    assert captured[0]["state_dim"] == 10
+
+
+def test_train_figure8_with_lidar(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--track", "figure8", "--use-lidar", "--num-lidar-rays", "16",
+            "--episodes", "1", "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    config_path = os.path.join(tmp_path, "config.json")
+    assert os.path.exists(config_path)
+
+
+# ---------------------------------------------------------------------------
 # Grid search tests
 # ---------------------------------------------------------------------------
 
