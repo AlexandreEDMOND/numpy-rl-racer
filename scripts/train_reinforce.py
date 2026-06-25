@@ -214,7 +214,7 @@ def main(argv=None):
     if args.log_dir:
         from numpy_rl_racer.utils.logging import TrainingLogger
         fieldnames = ["episode", "total_reward", "steps", "avg_loss", "elapsed_time"]
-        if args.value_network:
+        if args.use_value_network:
             fieldnames.append("avg_value_loss")
         if args.eval_freq > 0:
             fieldnames.extend(["eval_reward_mean", "eval_reward_std"])
@@ -258,7 +258,7 @@ def main(argv=None):
             rewards_arr = np.array(ep_rewards, dtype=np.float64)
             result = agent.train_step(states_arr, actions_arr, rewards_arr)
 
-            if args.value_network:
+            if args.use_value_network:
                 avg_loss, avg_v_loss = result
             else:
                 avg_loss = result
@@ -268,7 +268,7 @@ def main(argv=None):
             episode_losses.append(avg_loss)
 
             loss_str = f"loss={avg_loss:.6f}"
-            if args.value_network:
+            if args.use_value_network:
                 loss_str += f"  v_loss={avg_v_loss:.6f}"
 
             print(
@@ -285,7 +285,7 @@ def main(argv=None):
                 avg_loss=avg_loss,
                 elapsed_time=info.get('elapsed_time', 0.0),
             )
-            if args.value_network:
+            if args.use_value_network:
                 log_kwargs["avg_value_loss"] = avg_v_loss
             if args.lr_scheduler != "none":
                 log_kwargs["lr"] = agent.optimizer.lr
