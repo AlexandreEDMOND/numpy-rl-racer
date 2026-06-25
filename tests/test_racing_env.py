@@ -1270,6 +1270,7 @@ def test_lidar_all_track_types():
         ('rectangular', None),
         ('circular', None),
         ('figure8', None),
+        ('bezier', None),
     ]
     for track_type, _ in track_types:
         env = RacingEnv(
@@ -1295,7 +1296,7 @@ def test_lidar_deterministic_with_seed():
 
 
 def test_lidar_with_obstacles_all_track_types():
-    for track_type in ['rectangular', 'circular', 'figure8']:
+    for track_type in ['rectangular', 'circular', 'figure8', 'bezier']:
         env = RacingEnv(
             track_type=track_type,
             use_lidar=True, num_lidar_rays=8, lidar_max_range=10.0,
