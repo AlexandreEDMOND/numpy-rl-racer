@@ -1,3 +1,4 @@
+import matplotlib as mpl
 import numpy as np
 from matplotlib.path import Path
 import matplotlib.patches as mpatches
@@ -29,10 +30,10 @@ class MatplotlibRenderer:
             from numpy_rl_racer.env.racing_env import reward_line_endpoints as _rle
             self._reward_line_endpoints = [_rle(self.track, p) for p in reward_line_progress]
         self._compute_boundary_lines()
-        import matplotlib as mpl
         with mpl.rc_context(rc={
             'patch.antialiased': self._antialias,
             'lines.antialiased': self._antialias,
+            'text.antialiased': self._antialias,
         }):
             self._draw_background()
         self._recording = False
@@ -267,7 +268,6 @@ class MatplotlibRenderer:
                 fig.clear()
 
     def render(self, state, step=None, reward=None, obstacles=None):
-        import matplotlib as mpl
         with mpl.rc_context(rc={
             'patch.antialiased': self._antialias,
             'lines.antialiased': self._antialias,
