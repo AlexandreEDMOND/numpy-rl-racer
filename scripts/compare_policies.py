@@ -10,11 +10,11 @@ from numpy_rl_racer.env import CircularTrack, RacingEnv
 from numpy_rl_racer.rendering import MatplotlibRenderer
 
 
-def _record_episode(env, get_action, track, max_steps, dpi=100, fps=10):
+def _record_episode(env, get_action, track, max_steps, dpi=100, fps=10, antialias=True):
     renderer = MatplotlibRenderer(
         track, headless=True,
         reward_line_progress=getattr(env, '_reward_line_progress', None),
-        dpi=dpi, fps=fps,
+        dpi=dpi, fps=fps, antialias=antialias,
     )
     renderer.start_recording()
     state = env.reset(seed=42)
@@ -43,6 +43,8 @@ def main(argv=None):
                         help="DPI for rendered output (default: 100)")
     parser.add_argument("--fps", type=int, default=10,
                         help="Frames per second for animation output (default: 10)")
+    parser.add_argument("--no-antialias", action="store_false", dest="antialias", default=True,
+                        help="Disable anti-aliased rendering (default: enabled)")
     args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -74,11 +76,11 @@ def main(argv=None):
 
     trained_frames = _record_episode(
         env, lambda s: agent.act(s, training=False), track, args.max_steps,
-        dpi=args.render_dpi, fps=args.fps,
+        dpi=args.render_dpi, fps=args.fps, antialias=args.antialias,
     )
     random_frames = _record_episode(
         env, lambda s: rng.randint(len(ACTIONS)), track, args.max_steps,
-        dpi=args.render_dpi, fps=args.fps,
+        dpi=args.render_dpi, fps=args.fps, antialias=args.antialias,
     )
 
     from PIL import Image, ImageDraw

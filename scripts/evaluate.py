@@ -32,6 +32,8 @@ def main(argv=None):
                         help="Frames per second for animation output (default: 10)")
     parser.add_argument("--video", action="store_true",
                         help="Record and save MP4 video of each evaluation episode")
+    parser.add_argument("--no-antialias", action="store_false", dest="antialias", default=True,
+                        help="Disable anti-aliased rendering (default: enabled)")
     args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -60,7 +62,7 @@ def main(argv=None):
     agent.load(args.model_path)
     agent.epsilon = 0.0
 
-    renderer = MatplotlibRenderer(env.track, headless=args.headless, dpi=args.render_dpi, fps=args.fps)
+    renderer = MatplotlibRenderer(env.track, headless=args.headless, dpi=args.render_dpi, fps=args.fps, antialias=args.antialias)
 
     total_rewards = []
     total_steps = []

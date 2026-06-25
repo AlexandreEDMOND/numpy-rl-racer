@@ -146,6 +146,8 @@ def main(argv=None):
                         help="DPI for rendered output (default: 100)")
     parser.add_argument("--fps", type=int, default=10,
                         help="Frames per second for animation output (default: 10)")
+    parser.add_argument("--no-antialias", action="store_false", dest="antialias", default=True,
+                        help="Disable anti-aliased rendering (default: enabled)")
 
     known_args, _ = parser.parse_known_args(argv)
     if known_args.config:

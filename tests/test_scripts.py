@@ -244,6 +244,43 @@ def test_train_custom_render_args(tmp_path):
     assert config["fps"] == 20
 
 
+def test_train_default_antialias_true(tmp_path):
+    main = _make_main()
+    with patch("numpy_rl_racer.agent.dqn.DQNAgent.act", return_value=0), \
+         patch("numpy_rl_racer.agent.dqn.DQNAgent.train_step", return_value=0.0), \
+         patch("numpy_rl_racer.agent.dqn.DQNAgent.save"):
+        main([
+            "--episodes", "1", "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    config_path = os.path.join(tmp_path, "config.json")
+    with open(config_path) as f:
+        config = json.load(f)
+    assert config["antialias"] is True
+
+
+def test_train_no_antialias_arg(tmp_path):
+    main = _make_main()
+    with patch("numpy_rl_racer.agent.dqn.DQNAgent.act", return_value=0), \
+         patch("numpy_rl_racer.agent.dqn.DQNAgent.train_step", return_value=0.0), \
+         patch("numpy_rl_racer.agent.dqn.DQNAgent.save"):
+        main([
+            "--episodes", "1", "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--no-antialias",
+        ])
+    config_path = os.path.join(tmp_path, "config.json")
+    with open(config_path) as f:
+        config = json.load(f)
+    assert config["antialias"] is False
+
+
+def test_evaluate_no_antialias(tmp_path):
+    _run_evaluate_main(tmp_path, ["--no-antialias"])
+    saved = list(tmp_path.glob("eval_ep*_final.png"))
+    assert len(saved) == 1
+
+
 def _make_main():
     scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
     orig_path = sys.path.copy()
@@ -980,6 +1017,27 @@ def test_compare_policies_custom_render_args(tmp_path):
             "--save-dir", str(tmp_path),
             "--render-dpi", "200",
             "--fps", "15",
+        ])
+        gifs = list(tmp_path.glob("*.gif"))
+        assert len(gifs) >= 1
+        assert all(g.stat().st_size > 0 for g in gifs)
+    finally:
+        sys.path[:] = orig_path
+
+
+def test_compare_policies_no_antialias(tmp_path):
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from compare_policies import main
+        model_path = str(tmp_path / "test_model.npz")
+        _make_agent_checkpoint(model_path, state_dim=6)
+        main([
+            "--model-path", model_path,
+            "--max-steps", "3",
+            "--save-dir", str(tmp_path),
+            "--no-antialias",
         ])
         gifs = list(tmp_path.glob("*.gif"))
         assert len(gifs) >= 1

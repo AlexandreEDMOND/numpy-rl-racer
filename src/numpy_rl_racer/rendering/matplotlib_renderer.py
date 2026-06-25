@@ -6,11 +6,12 @@ from numpy_rl_racer.env.racing_env import Figure8Track
 
 
 class MatplotlibRenderer:
-    def __init__(self, track, figsize=(8, 6), headless=False, reward_line_progress=None, dpi=100, fps=10):
+    def __init__(self, track, figsize=(8, 6), headless=False, reward_line_progress=None, dpi=100, fps=10, antialias=True):
         self.track = track
         self._headless = headless
         self.dpi = dpi
         self._fps = fps
+        self._antialias = antialias
         if headless:
             from matplotlib.figure import Figure
             from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -20,15 +21,20 @@ class MatplotlibRenderer:
         else:
             import matplotlib.pyplot as plt
             self._plt = plt
-            self.fig, self.ax = plt.subplots(figsize=figsize)
-            self.fig.dpi = dpi
+            self.fig = plt.figure(figsize=figsize, dpi=dpi)
+            self.ax = self.fig.add_subplot(111)
         self.ax.set_aspect("equal")
         self._reward_line_endpoints = []
         if reward_line_progress is not None:
             from numpy_rl_racer.env.racing_env import reward_line_endpoints as _rle
             self._reward_line_endpoints = [_rle(self.track, p) for p in reward_line_progress]
         self._compute_boundary_lines()
-        self._draw_background()
+        import matplotlib as mpl
+        with mpl.rc_context(rc={
+            'patch.antialiased': self._antialias,
+            'lines.antialiased': self._antialias,
+        }):
+            self._draw_background()
         self._recording = False
         self._recording_frames = []
 
@@ -261,36 +267,42 @@ class MatplotlibRenderer:
                 fig.clear()
 
     def render(self, state, step=None, reward=None, obstacles=None):
-        self.ax.clear()
-        self._draw_background()
+        import matplotlib as mpl
+        with mpl.rc_context(rc={
+            'patch.antialiased': self._antialias,
+            'lines.antialiased': self._antialias,
+            'text.antialiased': self._antialias,
+        }):
+            self.ax.clear()
+            self._draw_background()
 
-        if obstacles:
-            for obs in obstacles:
-                circle = mpatches.Circle(
-                    (float(obs.x), float(obs.y)),
-                    float(obs.radius),
-                    facecolor="#e74c3c",
-                    edgecolor="#c0392b",
-                    linewidth=1.5,
-                    zorder=4,
-                )
-                self.ax.add_patch(circle)
+            if obstacles:
+                for obs in obstacles:
+                    circle = mpatches.Circle(
+                        (float(obs.x), float(obs.y)),
+                        float(obs.radius),
+                        facecolor="#e74c3c",
+                        edgecolor="#c0392b",
+                        linewidth=1.5,
+                        zorder=4,
+                    )
+                    self.ax.add_patch(circle)
 
-        self.ax.plot(float(state.x), float(state.y), "o", color="red", markersize=8, zorder=5)
+            self.ax.plot(float(state.x), float(state.y), "o", color="red", markersize=8, zorder=5)
 
-        dx = np.cos(float(state.heading)) * 0.5
-        dy = np.sin(float(state.heading)) * 0.5
-        self.ax.arrow(
-            float(state.x), float(state.y), dx, dy,
-            head_width=0.2, head_length=0.2, fc="red", ec="red", zorder=6,
-        )
+            dx = np.cos(float(state.heading)) * 0.5
+            dy = np.sin(float(state.heading)) * 0.5
+            self.ax.arrow(
+                float(state.x), float(state.y), dx, dy,
+                head_width=0.2, head_length=0.2, fc="red", ec="red", zorder=6,
+            )
 
-        title = "numpy-rl-racer"
-        if step is not None:
-            title += f"   step={step}"
-        if reward is not None:
-            title += f"   reward={reward:.2f}"
-        self.ax.set_title(title)
+            title = "numpy-rl-racer"
+            if step is not None:
+                title += f"   step={step}"
+            if reward is not None:
+                title += f"   reward={reward:.2f}"
+            self.ax.set_title(title)
 
         self.fig.canvas.draw_idle()
         if self._recording:

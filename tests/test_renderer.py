@@ -407,3 +407,45 @@ def test_renderer_backward_compatible_no_dpi_fps():
     assert renderer.dpi == 100
     assert renderer._fps == 10
     renderer.close()
+
+
+# ── Anti-aliased rendering tests ─────────────────────────────────────
+
+
+def test_renderer_antialias_default_true():
+    track = RectangularTrack()
+    renderer = MatplotlibRenderer(track, headless=True)
+    assert renderer._antialias is True
+    renderer.close()
+
+
+def test_renderer_antialias_disabled():
+    track = RectangularTrack()
+    renderer = MatplotlibRenderer(track, headless=True, antialias=False)
+    assert renderer._antialias is False
+    renderer.close()
+
+
+def test_renderer_antialias_renders_without_error(tmp_path):
+    track = RectangularTrack()
+    renderer = MatplotlibRenderer(track, headless=True, antialias=False)
+    state = CarState(x=0.0, y=0.0, heading=0.0, velocity=0.0)
+    renderer.start_recording()
+    renderer.render(state)
+    renderer.render(state, step=1, reward=0.5)
+    gif_path = tmp_path / "no_antialias.gif"
+    renderer.save_animation(str(gif_path))
+    assert gif_path.exists()
+    assert gif_path.stat().st_size > 0
+    renderer.close()
+
+
+def test_renderer_antialias_frame_dimensions_preserved():
+    track = RectangularTrack()
+    renderer = MatplotlibRenderer(track, headless=True, dpi=100, antialias=False)
+    state = CarState(x=0.0, y=0.0, heading=0.0, velocity=0.0)
+    renderer.start_recording()
+    renderer.render(state)
+    frame = renderer._recording_frames[0]
+    assert frame.shape == (600, 800, 3)
+    renderer.close()
