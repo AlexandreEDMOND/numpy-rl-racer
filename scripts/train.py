@@ -142,6 +142,10 @@ def main(argv=None):
                         help="Seed for reproducible obstacle placement (default: None)")
     parser.add_argument("--skip-frames", type=int, default=1,
                         help="Number of times to repeat each action (default: 1)")
+    parser.add_argument("--render-dpi", type=int, default=100,
+                        help="DPI for rendered output (default: 100)")
+    parser.add_argument("--fps", type=int, default=10,
+                        help="Frames per second for animation output (default: 10)")
 
     known_args, _ = parser.parse_known_args(argv)
     if known_args.config:

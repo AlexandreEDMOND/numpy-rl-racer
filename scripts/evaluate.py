@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 
 import numpy as np
 
@@ -25,6 +26,12 @@ def main(argv=None):
     parser.add_argument("--headless", action="store_true", help="Run in headless mode (no GUI window)")
     parser.add_argument("--gif", "--save-gif", action="store_true",
                         help="Record and save GIF animation of each evaluation episode")
+    parser.add_argument("--render-dpi", type=int, default=100,
+                        help="DPI for rendered output (default: 100)")
+    parser.add_argument("--fps", type=int, default=10,
+                        help="Frames per second for animation output (default: 10)")
+    parser.add_argument("--video", action="store_true",
+                        help="Record and save MP4 video of each evaluation episode")
     args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -53,7 +60,7 @@ def main(argv=None):
     agent.load(args.model_path)
     agent.epsilon = 0.0
 
-    renderer = MatplotlibRenderer(env.track, headless=args.headless)
+    renderer = MatplotlibRenderer(env.track, headless=args.headless, dpi=args.render_dpi, fps=args.fps)
 
     total_rewards = []
     total_steps = []
@@ -62,7 +69,7 @@ def main(argv=None):
         state = env.reset(seed=args.seed + ep)
         ep_reward = 0.0
 
-        if args.gif:
+        if args.gif or args.video:
             renderer.start_recording()
 
         for step in range(args.max_steps):
@@ -85,8 +92,20 @@ def main(argv=None):
 
         if args.gif:
             gif_path = os.path.join(args.save_dir, f"eval_ep{ep}.gif")
-            renderer.save_animation(gif_path, fps=10)
+            renderer.save_animation(gif_path)
             print(f"  Saved {gif_path}")
+        if args.video:
+            video_path = os.path.join(args.save_dir, f"eval_ep{ep}.mp4")
+            try:
+                renderer.save_video(video_path)
+                print(f"  Saved {video_path}")
+            except (ImportError, RuntimeError) as e:
+                print(f"[WARNING] Could not create MP4: {e}. Saving GIF instead.", file=sys.stderr)
+                gif_fallback = os.path.join(args.save_dir, f"eval_ep{ep}.gif")
+                renderer.save_animation(gif_fallback)
+                print(f"  Saved {gif_fallback}")
+
+        if args.gif or args.video:
             renderer.stop_recording()
 
     renderer.close()

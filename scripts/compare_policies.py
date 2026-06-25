@@ -10,10 +10,11 @@ from numpy_rl_racer.env import CircularTrack, RacingEnv
 from numpy_rl_racer.rendering import MatplotlibRenderer
 
 
-def _record_episode(env, get_action, track, max_steps):
+def _record_episode(env, get_action, track, max_steps, dpi=100, fps=10):
     renderer = MatplotlibRenderer(
         track, headless=True,
         reward_line_progress=getattr(env, '_reward_line_progress', None),
+        dpi=dpi, fps=fps,
     )
     renderer.start_recording()
     state = env.reset(seed=42)
@@ -38,6 +39,10 @@ def main(argv=None):
     parser.add_argument("--max-steps", type=int, default=200)
     parser.add_argument("--save-dir", default="images")
     parser.add_argument("--track", choices=["rectangular", "circular"], default="rectangular")
+    parser.add_argument("--render-dpi", type=int, default=100,
+                        help="DPI for rendered output (default: 100)")
+    parser.add_argument("--fps", type=int, default=10,
+                        help="Frames per second for animation output (default: 10)")
     args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -68,10 +73,12 @@ def main(argv=None):
     rng = np.random.RandomState(0)
 
     trained_frames = _record_episode(
-        env, lambda s: agent.act(s, training=False), track, args.max_steps
+        env, lambda s: agent.act(s, training=False), track, args.max_steps,
+        dpi=args.render_dpi, fps=args.fps,
     )
     random_frames = _record_episode(
-        env, lambda s: rng.randint(len(ACTIONS)), track, args.max_steps
+        env, lambda s: rng.randint(len(ACTIONS)), track, args.max_steps,
+        dpi=args.render_dpi, fps=args.fps,
     )
 
     from PIL import Image, ImageDraw
@@ -93,7 +100,7 @@ def main(argv=None):
         side_by_side.append(img)
 
     gif_path = os.path.join(args.save_dir, "trained_vs_random.gif")
-    duration = 100
+    duration = int(1000 / args.fps)
     side_by_side[0].save(
         gif_path,
         save_all=True,

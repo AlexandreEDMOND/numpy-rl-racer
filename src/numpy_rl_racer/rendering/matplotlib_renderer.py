@@ -6,19 +6,22 @@ from numpy_rl_racer.env.racing_env import Figure8Track
 
 
 class MatplotlibRenderer:
-    def __init__(self, track, figsize=(8, 6), headless=False, reward_line_progress=None):
+    def __init__(self, track, figsize=(8, 6), headless=False, reward_line_progress=None, dpi=100, fps=10):
         self.track = track
         self._headless = headless
+        self.dpi = dpi
+        self._fps = fps
         if headless:
             from matplotlib.figure import Figure
             from matplotlib.backends.backend_agg import FigureCanvasAgg
-            self.fig = Figure(figsize=figsize)
+            self.fig = Figure(figsize=figsize, dpi=dpi)
             FigureCanvasAgg(self.fig)
             self.ax = self.fig.add_subplot(111)
         else:
             import matplotlib.pyplot as plt
             self._plt = plt
             self.fig, self.ax = plt.subplots(figsize=figsize)
+            self.fig.dpi = dpi
         self.ax.set_aspect("equal")
         self._reward_line_endpoints = []
         if reward_line_progress is not None:
@@ -205,7 +208,8 @@ class MatplotlibRenderer:
         if clear:
             self._recording_frames = []
 
-    def save_animation(self, filepath, fps=10):
+    def save_animation(self, filepath, fps=None):
+        fps = self._fps if fps is None else fps
         if not self._recording_frames:
             raise RuntimeError(
                 "No frames recorded. Call start_recording() and render() before save_animation()."
@@ -225,6 +229,36 @@ class MatplotlibRenderer:
             duration=duration,
             loop=0,
         )
+
+    def save_video(self, filepath, fps=None, dpi=None):
+        fps = self._fps if fps is None else fps
+        dpi = self.dpi if dpi is None else dpi
+        if not self._recording_frames:
+            raise RuntimeError(
+                "No frames recorded. Call start_recording() and render() before save_video()."
+            )
+        try:
+            from matplotlib.animation import FFMpegWriter
+        except ImportError:
+            raise ImportError("FFMpegWriter is not available in this matplotlib installation.")
+        import subprocess
+        try:
+            subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            raise RuntimeError(
+                "ffmpeg not found on system. Install ffmpeg to export MP4 videos."
+            )
+        from matplotlib.figure import Figure
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        h, w = self._recording_frames[0].shape[:2]
+        fig = Figure(figsize=(w / dpi, h / dpi), dpi=dpi)
+        FigureCanvasAgg(fig)
+        writer = FFMpegWriter(fps=fps)
+        with writer.saving(fig, filepath, dpi):
+            for frame_rgb in self._recording_frames:
+                fig.figimage(frame_rgb, origin="upper")
+                writer.grab_frame()
+                fig.clear()
 
     def render(self, state, step=None, reward=None, obstacles=None):
         self.ax.clear()
