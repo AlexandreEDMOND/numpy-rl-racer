@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
 
-from numpy_rl_racer.agent.reinforce import REINFORCEAgent, N_ACTIONS, discounted_sum
+from numpy_rl_racer.agent.dqn import N_ACTIONS
+from numpy_rl_racer.agent.reinforce import REINFORCEAgent, discounted_sum
 from numpy_rl_racer.network import PolicyNetwork, SGD, Adam, MLP
 from numpy_rl_racer.utils.scheduler import ExponentialDecay
 

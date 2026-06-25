@@ -1,17 +1,7 @@
 import numpy as np
 
+from numpy_rl_racer.agent.dqn import N_ACTIONS
 from numpy_rl_racer.network import MLP, PolicyNetwork, SGD, Adam, mse_loss
-
-
-ACTIONS = np.array([
-    [-0.5, 1.0],
-    [0.5, 1.0],
-    [0.0, 1.0],
-    [0.0, 0.0],
-    [0.0, -0.5],
-], dtype=np.float64)
-
-N_ACTIONS = len(ACTIONS)
 
 
 def discounted_sum(rewards, gamma):
