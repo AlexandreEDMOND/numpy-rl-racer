@@ -173,6 +173,39 @@ class DuelingMLP:
         return f"DuelingMLP(encoder={self.shared_encoder}, value={self.value_layer}, advantage={self.advantage_layer})"
 
 
+class PolicyNetwork:
+    def __init__(self, layer_sizes):
+        self.mlp = MLP(layer_sizes)
+
+    @property
+    def layers(self):
+        return self.mlp.layers
+
+    def forward(self, x):
+        return self.mlp.forward(x)
+
+    def backward(self, grad_output):
+        return self.mlp.backward(grad_output)
+
+    def parameters(self):
+        return self.mlp.parameters()
+
+    def get_probs(self, logits):
+        max_logit = np.max(logits, axis=-1, keepdims=True)
+        exp = np.exp(logits - max_logit)
+        return exp / np.sum(exp, axis=-1, keepdims=True)
+
+    def log_prob(self, actions, logits):
+        probs = self.get_probs(logits)
+        probs = np.clip(probs, 1e-12, 1.0)
+        return np.log(probs[np.arange(len(actions)), actions])
+
+    def sample_action(self, logits, rng=None):
+        probs = self.get_probs(logits)
+        _rng = rng if rng is not None else np.random
+        return int(_rng.choice(len(probs), p=probs))
+
+
 class SGD:
     def __init__(self, mlp, lr=1e-3, scheduler=None, momentum=0.0, max_grad_norm=None):
         self.mlp = mlp
