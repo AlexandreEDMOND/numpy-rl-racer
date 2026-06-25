@@ -7,6 +7,7 @@ import numpy as np
 
 from numpy_rl_racer.agent import DQNAgent, ACTIONS
 from numpy_rl_racer.env import CircularTrack, Figure8Track, Obstacle, RacingEnv, RectangularTrack
+from numpy_rl_racer.env.wrappers import ActionRepeatEnv
 from numpy_rl_racer.utils.scheduler import ExponentialDecay, StepDecay
 
 
@@ -139,6 +140,8 @@ def main(argv=None):
                         help="Number of obstacles to place on the track (default: 0)")
     parser.add_argument("--obstacle-seed", type=int, default=None,
                         help="Seed for reproducible obstacle placement (default: None)")
+    parser.add_argument("--skip-frames", type=int, default=1,
+                        help="Number of times to repeat each action (default: 1)")
 
     known_args, _ = parser.parse_known_args(argv)
     if known_args.config:
@@ -169,6 +172,12 @@ def main(argv=None):
 
     env = RacingEnv(track=track, randomize_start=args.randomize_start,
                     time_penalty=args.time_penalty, obstacles=obstacles)
+
+    if args.skip_frames > 1:
+        env = ActionRepeatEnv(env, skip_frames=args.skip_frames)
+        print(f"Action repeat enabled: skip_frames={args.skip_frames}")
+    elif args.skip_frames < 1:
+        raise ValueError(f"--skip-frames must be >= 1, got {args.skip_frames}")
 
     print(f"Track type: {args.track}")
     scheduler = None

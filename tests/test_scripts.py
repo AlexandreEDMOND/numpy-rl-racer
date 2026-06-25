@@ -730,6 +730,68 @@ def test_obstacles_config_keys(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Skip-frames (action repeat) tests
+# ---------------------------------------------------------------------------
+
+
+def test_train_skip_frames_env_wrapped(tmp_path):
+    main = _make_main()
+    wraps = []
+    real_init = RacingEnv.__init__
+    def tracking_init(self, **kwargs):
+        wraps.append(kwargs)
+        real_init(self, **kwargs)
+    with patch.object(RacingEnv, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--skip-frames", "4",
+            "--episodes", "1", "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    assert len(wraps) >= 1
+
+
+def test_train_skip_frames_default_1(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1", "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    # Default skip_frames=1 means no wrapping — env is a RacingEnv, not ActionRepeatEnv
+
+
+def test_train_skip_frames_invalid(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        with pytest.raises(ValueError, match="--skip-frames must be >= 1"):
+            main([
+                "--skip-frames", "0",
+                "--episodes", "1", "--max-steps", "1",
+                "--save-dir", str(tmp_path),
+            ])
+
+
+def test_train_skip_frames_with_obstacles(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--skip-frames", "3",
+            "--num-obstacles", "2", "--obstacle-seed", "7",
+            "--episodes", "1", "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+
+# ---------------------------------------------------------------------------
 # Grid search tests
 # ---------------------------------------------------------------------------
 
