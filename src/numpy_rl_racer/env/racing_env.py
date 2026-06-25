@@ -196,12 +196,11 @@ class BezierTrack:
         self.track_width = np.float64(track_width)
         self.radius = np.float64(radius)
 
-        if seed is not None:
-            np.random.seed(seed)
+        rng = np.random.RandomState(seed)
 
         # Generate anchor points at random angles and radii
-        angles = np.sort(np.random.uniform(0, 2 * np.pi, self.num_anchors))
-        radii = np.random.uniform(0.5 * radius, 1.5 * radius, self.num_anchors)
+        angles = np.sort(rng.uniform(0, 2 * np.pi, self.num_anchors))
+        radii = rng.uniform(0.5 * radius, 1.5 * radius, self.num_anchors)
         anchors = np.column_stack([radii * np.cos(angles), radii * np.sin(angles)])
 
         # Compute cubic Bezier control points (Catmull-Rom -> Bezier)
