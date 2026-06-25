@@ -4,7 +4,7 @@ matplotlib.use("Agg")
 import pytest
 
 from numpy_rl_racer.rendering import MatplotlibRenderer
-from numpy_rl_racer.env.racing_env import CircularTrack, Figure8Track, RectangularTrack
+from numpy_rl_racer.env.racing_env import BezierTrack, CircularTrack, Figure8Track, RectangularTrack
 from numpy_rl_racer.env.car import CarState
 
 
@@ -261,4 +261,66 @@ def test_reward_lines_empty_when_not_provided():
     track = RectangularTrack()
     renderer = MatplotlibRenderer(track, headless=True)
     assert len(renderer._reward_line_endpoints) == 0
+    renderer.close()
+
+
+# ── BezierTrack Renderer Tests ─────────────────────────────────────
+
+
+def test_renderer_can_be_instantiated_with_bezier_track():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    renderer = MatplotlibRenderer(track)
+    assert renderer is not None
+    assert renderer.fig is not None
+    assert renderer.ax is not None
+    renderer.close()
+
+
+def test_renderer_renders_state_with_bezier_track():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    renderer = MatplotlibRenderer(track)
+    gx, gy = track.goal_position
+    state = CarState(x=float(gx), y=float(gy), heading=0.0, velocity=2.0)
+    renderer.render(state, step=0, reward=0.1)
+    renderer.close()
+
+
+def test_boundary_lines_drawn_as_line2d_bezier():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    renderer = MatplotlibRenderer(track, headless=True)
+    gx, gy = track.goal_position
+    state = CarState(x=float(gx), y=float(gy), heading=0.0, velocity=2.0)
+    renderer.render(state)
+    lines = renderer.ax.get_lines()
+    assert len(lines) > 0
+    assert "#666666" in {line.get_color() for line in lines}
+    renderer.close()
+
+
+def test_headless_bezier_renderer_saves_figure(tmp_path):
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    renderer = MatplotlibRenderer(track, headless=True)
+    gx, gy = track.goal_position
+    state = CarState(x=float(gx), y=float(gy), heading=0.0, velocity=2.0)
+    renderer.render(state, step=0, reward=0.1)
+    renderer.render(state, step=1, reward=0.2)
+    save_path = tmp_path / "test_bezier_output.png"
+    renderer.fig.savefig(str(save_path), dpi=150)
+    assert save_path.exists()
+    assert save_path.stat().st_size > 0
+    renderer.close()
+
+
+def test_recording_bezier_saves_nonempty_gif(tmp_path):
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    renderer = MatplotlibRenderer(track, headless=True)
+    gx, gy = track.goal_position
+    state = CarState(x=float(gx), y=float(gy), heading=0.0, velocity=2.0)
+    renderer.start_recording()
+    renderer.render(state, step=0, reward=0.1)
+    renderer.render(state, step=1, reward=0.2)
+    gif_path = tmp_path / "test_bezier.gif"
+    renderer.save_animation(str(gif_path), fps=10)
+    assert gif_path.exists()
+    assert gif_path.stat().st_size > 0
     renderer.close()

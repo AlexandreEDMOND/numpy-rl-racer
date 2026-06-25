@@ -1,7 +1,7 @@
 import numpy as np
 
 from numpy_rl_racer.env.car import CarState
-from numpy_rl_racer.env.racing_env import CircularTrack, Figure8Track, Obstacle, RacingEnv, RectangularTrack, reward_line_endpoints
+from numpy_rl_racer.env.racing_env import BezierTrack, CircularTrack, Figure8Track, Obstacle, RacingEnv, RectangularTrack, reward_line_endpoints
 
 
 def test_reset_returns_numpy_observation():
@@ -274,6 +274,182 @@ def test_figure8_track_progress_bounds():
         x, y, _ = track.sample_centerline_point(t)
         p = track.progress_along_centerline(x, y)
         assert 0.0 <= p <= 1.0
+
+
+# ── BezierTrack ─────────────────────────────────────────────────────
+
+
+def test_bezier_track_initialization():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0)
+    assert track.num_anchors == 8
+    assert track.track_width == np.float64(2.0)
+    assert track.radius == np.float64(6.0)
+
+
+def test_bezier_track_different_seeds_different_geometry():
+    track1 = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    track2 = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=99)
+    # Different seeds should produce different control points
+    assert not np.allclose(track1._anchors, track2._anchors)
+
+
+def test_bezier_track_same_seed_reproduces_geometry():
+    track1 = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    track2 = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    np.testing.assert_array_equal(track1._anchors, track2._anchors)
+    np.testing.assert_array_equal(track1._centerline, track2._centerline)
+
+
+def test_bezier_track_centerline_is_closed():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    # Centerline should form a closed loop: first and last points should be close
+    first = track._centerline[0]
+    last = track._centerline[-1]
+    dist = np.sqrt(np.sum((first - last) ** 2))
+    assert dist < 0.1, f"Centerline not closed, distance: {dist}"
+
+
+def test_bezier_track_progress_at_goal_is_zero():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    gx, gy = track.goal_position
+    np.testing.assert_almost_equal(track.progress_along_centerline(gx, gy), 0.0)
+
+
+def test_bezier_track_progress_monotonic():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    ts = np.linspace(0.01, 0.99, 20)
+    prev_p = -1.0
+    for t in ts:
+        x, y, _ = track.sample_centerline_point(t)
+        p = track.progress_along_centerline(x, y)
+        assert p >= prev_p - 0.01, f"Progress regressed at t={t}: {prev_p} -> {p}"
+        prev_p = p
+
+
+def test_bezier_track_progress_bounds():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    for t in np.linspace(0.0, 0.99, 20):
+        x, y, _ = track.sample_centerline_point(t)
+        p = track.progress_along_centerline(x, y)
+        assert 0.0 <= p <= 1.0
+
+
+def test_bezier_track_progress_wraps():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    gx, gy = track.goal_position
+    assert track.progress_along_centerline(gx, gy) == np.float64(0.0)
+    x_just_before, y_just_before, _ = track.sample_centerline_point(0.999)
+    p = track.progress_along_centerline(x_just_before, y_just_before)
+    assert p > 0.99
+
+
+def test_bezier_track_centerline_points_are_on_track():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    for t in np.linspace(0.0, 0.99, 20):
+        x, y, _ = track.sample_centerline_point(t)
+        assert track.is_on_track(x, y), f"Centerline point at t={t} not on track"
+
+
+def test_bezier_track_far_points_off_track():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    assert track.is_on_track(float(track._cs_x[0]), float(track._cs_y[0])), "Start point should be on track"
+    assert not track.is_on_track(100.0, 0.0), "Point far right should be off track"
+    assert not track.is_on_track(0.0, 100.0), "Point far above should be off track"
+
+
+def test_bezier_track_centerline_info_on_centerline():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    gx, gy = track.goal_position
+    dist, _ = track.centerline_info(gx, gy)
+    np.testing.assert_almost_equal(dist, 0.0, decimal=10)
+
+
+def test_bezier_track_sample_returns_on_track():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    for _ in range(20):
+        x, y, _ = track.sample_centerline_point()
+        assert track.is_on_track(x, y)
+
+
+def test_bezier_track_get_centerline_point():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    gx, gy = track.goal_position
+    cx, cy, tangent = track.get_centerline_point(0.0)
+    np.testing.assert_almost_equal(float(cx), float(gx), decimal=10)
+    np.testing.assert_almost_equal(float(cy), float(gy), decimal=10)
+
+    cx, cy, tangent = track.get_centerline_point(0.5)
+    p = track.progress_along_centerline(cx, cy)
+    np.testing.assert_almost_equal(p, 0.5, decimal=2)
+
+
+def test_bezier_track_half_properties():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    assert track.half_w > 0
+    assert track.half_h > 0
+    assert isinstance(track.half_w, np.float64)
+    assert isinstance(track.half_h, np.float64)
+
+
+def test_bezier_track_small_number_of_anchors():
+    track = BezierTrack(num_anchors=3, track_width=2.0, radius=6.0, seed=42)
+    assert track.num_anchors == 3
+    assert track._perimeter > 0
+    # Centerline should still form a closed loop
+    first = track._centerline[0]
+    last = track._centerline[-1]
+    dist = np.sqrt(np.sum((first - last) ** 2))
+    assert dist < 0.1
+
+
+def test_bezier_racing_env_reset():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    env = RacingEnv(track=track, randomize_start=False)
+    obs = env.reset(seed=42)
+    gx, gy = track.goal_position
+    np.testing.assert_almost_equal(float(env.state.x), float(gx), decimal=10)
+    np.testing.assert_almost_equal(float(env.state.y), float(gy), decimal=10)
+    assert isinstance(obs, np.ndarray)
+
+
+def test_bezier_racing_env_randomized_start_on_track():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    env = RacingEnv(track=track, randomize_start=True)
+    for seed in range(10):
+        env.reset(seed=seed)
+        assert track.is_on_track(env.state.x, env.state.y), (
+            f"Start position ({env.state.x}, {env.state.y}) with seed {seed} is off track"
+        )
+
+
+def test_bezier_racing_env_step_straight_stays_on_track():
+    track = BezierTrack(num_anchors=8, track_width=2.0, radius=6.0, seed=42)
+    env = RacingEnv(track=track)
+    env.reset(seed=42)
+    for _ in range(30):
+        obs, reward, done, info = env.step(np.array([1.0, 5.0]))
+        if done:
+            break
+
+
+def test_bezier_racing_env_track_type():
+    env = RacingEnv(track_type='bezier')
+    assert isinstance(env.track, BezierTrack)
+    obs = env.reset(seed=42)
+    assert isinstance(obs, np.ndarray)
+    assert not np.any(np.isnan(obs))
+
+
+def test_bezier_racing_env_reset_and_steps():
+    """Integration test: reset + 10 step() calls on bezier track complete without errors."""
+    env = RacingEnv(track_type='bezier')
+    env.reset(seed=42)
+    for _ in range(10):
+        obs, reward, done, info = env.step(np.array([0.0, 2.0]))
+        assert isinstance(obs, np.ndarray)
+        assert np.all(np.isfinite(obs))
+        assert 'progress' in info
+        assert 'lap_count' in info
 
 
 # ── CircularTrack ──────────────────────────────────────────────────

@@ -190,6 +190,134 @@ class CircularTrack:
         return dist_to_centerline, angle
 
 
+class BezierTrack:
+    def __init__(self, num_anchors=8, track_width=2.0, radius=6.0, seed=None):
+        self.num_anchors = max(3, num_anchors)
+        self.track_width = np.float64(track_width)
+        self.radius = np.float64(radius)
+
+        if seed is not None:
+            np.random.seed(seed)
+
+        # Generate anchor points at random angles and radii
+        angles = np.sort(np.random.uniform(0, 2 * np.pi, self.num_anchors))
+        radii = np.random.uniform(0.5 * radius, 1.5 * radius, self.num_anchors)
+        anchors = np.column_stack([radii * np.cos(angles), radii * np.sin(angles)])
+
+        # Compute cubic Bezier control points (Catmull-Rom -> Bezier)
+        n = self.num_anchors
+        cp_list = []
+        for i in range(n):
+            p0 = anchors[i]
+            p3 = anchors[(i + 1) % n]
+            p_prev = anchors[(i - 1) % n]
+            p_next = anchors[(i + 2) % n]
+            p1 = p0 + (p3 - p_prev) / 6.0
+            p2 = p3 - (p_next - p0) / 6.0
+            cp_list.extend([p0, p1, p2])
+        self._control_points = np.array(cp_list)
+        self._anchors = anchors
+
+        self._precompute()
+
+    def _precompute(self):
+        n_seg = self.num_anchors
+        samples_per_seg = 2000 // n_seg
+        cp = self._control_points
+
+        pts_list = []
+        for i in range(n_seg):
+            P0 = cp[3 * i]
+            P1 = cp[3 * i + 1]
+            P2 = cp[3 * i + 2]
+            P3 = cp[3 * ((i + 1) % n_seg)]
+
+            t = np.linspace(0, 1, samples_per_seg, endpoint=(i == n_seg - 1))
+            t2 = t * t
+            t3 = t2 * t
+            mt = 1.0 - t
+            mt2 = mt * mt
+            mt3 = mt2 * mt
+
+            pts = (mt3[:, None] * P0 + 3.0 * mt2[:, None] * t[:, None] * P1
+                   + 3.0 * mt[:, None] * t2[:, None] * P2 + t3[:, None] * P3)
+            pts_list.append(pts)
+
+        self._centerline = np.vstack(pts_list)
+        self._n = len(self._centerline)
+        self._cs_x = self._centerline[:, 0]
+        self._cs_y = self._centerline[:, 1]
+
+        # Cumulative distances along centerline
+        diffs = np.diff(self._centerline, axis=0)
+        seg_lengths = np.sqrt(np.sum(diffs ** 2, axis=1))
+        self._cumulative_dist = np.concatenate([[0.0], np.cumsum(seg_lengths)])
+        self._perimeter = self._cumulative_dist[-1]
+
+        # Tangents via central differences (with wrap-around)
+        tangents = np.zeros(self._n)
+        for i in range(self._n):
+            i_prev = (i - 1) % self._n
+            i_next = (i + 1) % self._n
+            dx = self._cs_x[i_next] - self._cs_x[i_prev]
+            dy = self._cs_y[i_next] - self._cs_y[i_prev]
+            tangents[i] = np.arctan2(dy, dx)
+        self._cs_tangents = tangents
+
+    @property
+    def goal_position(self):
+        return (np.float64(self._cs_x[0]), np.float64(self._cs_y[0]))
+
+    @property
+    def start_position(self):
+        return (np.float64(self._cs_x[0]), np.float64(self._cs_y[0]), np.float64(self._cs_tangents[0]))
+
+    @property
+    def half_w(self):
+        return np.float64(np.max(np.abs(self._cs_x)) + float(self.track_width))
+
+    @property
+    def half_h(self):
+        return np.float64(np.max(np.abs(self._cs_y)) + float(self.track_width))
+
+    def sample_centerline_point(self, t=None):
+        if t is None:
+            t = np.random.uniform(0.0, 1.0)
+        return self.get_centerline_point(t)
+
+    def progress_along_centerline(self, x, y):
+        px, py = np.float64(x), np.float64(y)
+        dx = self._cs_x - px
+        dy = self._cs_y - py
+        dist_sq = dx * dx + dy * dy
+        best_idx = np.argmin(dist_sq)
+        return np.float64(self._cumulative_dist[best_idx] / self._perimeter)
+
+    def is_on_track(self, x, y):
+        px, py = np.float64(x), np.float64(y)
+        dx = self._cs_x - px
+        dy = self._cs_y - py
+        dist_sq = dx * dx + dy * dy
+        min_dist = np.sqrt(np.min(dist_sq))
+        return min_dist <= self.track_width / np.float64(2.0)
+
+    def get_centerline_point(self, progress):
+        target_len = np.clip(progress, 0.0, 1.0) * self._perimeter
+        idx = np.searchsorted(self._cumulative_dist, target_len)
+        idx = np.clip(idx, 0, self._n - 1)
+        return (np.float64(self._cs_x[idx]), np.float64(self._cs_y[idx]), np.float64(self._cs_tangents[idx]))
+
+    def centerline_info(self, x, y):
+        px, py = np.float64(x), np.float64(y)
+        dx = self._cs_x - px
+        dy = self._cs_y - py
+        dist_sq = dx * dx + dy * dy
+        best_idx = np.argmin(dist_sq)
+        dist = np.sqrt(dist_sq[best_idx])
+        tangent = self._cs_tangents[best_idx]
+        return (dist, tangent)
+
+
 class Figure8Track:
     def __init__(self, radius=6.0, track_width=2.0):
         self.radius = np.float64(radius)
@@ -275,6 +403,11 @@ class RacingEnv:
         elif track_type == 'figure8':
             radius = min(track_width, track_height) / 2.0
             self.track = Figure8Track(radius, track_road_width)
+        elif track_type == 'bezier':
+            self.track = BezierTrack(
+                track_width=track_road_width,
+                radius=min(track_width, track_height) / 2.0,
+            )
         else:
             self.track = RectangularTrack(track_width, track_height, track_road_width)
         self.randomize_start = randomize_start
@@ -431,6 +564,24 @@ class RacingEnv:
                 segments.append((left_ends[i][1], left_ends[j][0]))
 
         elif isinstance(self.track, Figure8Track):
+            n = self.track._n
+            cs_x = self.track._cs_x
+            cs_y = self.track._cs_y
+            tangents = self.track._cs_tangents
+            tw2 = self.track.track_width / np.float64(2.0)
+
+            px_arr = -np.sin(tangents) * tw2
+            py_arr = np.cos(tangents) * tw2
+            left_x = cs_x + px_arr
+            left_y = cs_y + py_arr
+            right_x = cs_x - px_arr
+            right_y = cs_y - py_arr
+
+            for i in range(n - 1):
+                segments.append(((left_x[i], left_y[i]), (left_x[i + 1], left_y[i + 1])))
+                segments.append(((right_x[i], right_y[i]), (right_x[i + 1], right_y[i + 1])))
+
+        elif isinstance(self.track, BezierTrack):
             n = self.track._n
             cs_x = self.track._cs_x
             cs_y = self.track._cs_y

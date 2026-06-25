@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib.path import Path
 import matplotlib.patches as mpatches
 
-from numpy_rl_racer.env.racing_env import Figure8Track
+from numpy_rl_racer.env.racing_env import BezierTrack, Figure8Track
 
 
 class MatplotlibRenderer:
@@ -32,6 +32,8 @@ class MatplotlibRenderer:
     def _compute_boundary_lines(self):
         if isinstance(self.track, Figure8Track):
             self._compute_figure8_boundaries()
+        elif isinstance(self.track, BezierTrack):
+            self._compute_bezier_boundaries()
         elif hasattr(self.track, 'radius'):
             R = float(self.track.radius)
             tw2 = float(self.track.track_width) / 2.0
@@ -85,6 +87,8 @@ class MatplotlibRenderer:
     def _draw_background(self):
         if isinstance(self.track, Figure8Track):
             self._draw_figure8_background()
+        elif isinstance(self.track, BezierTrack):
+            self._draw_bezier_background()
         elif hasattr(self.track, 'radius'):
             self._draw_circular_background()
         else:
@@ -144,6 +148,47 @@ class MatplotlibRenderer:
         margin = tw
         self.ax.set_xlim(-R - margin, R + margin)
         self.ax.set_ylim(-R - margin, R + margin)
+        self.ax.grid(True, alpha=0.3)
+        self.ax.set_title("numpy-rl-racer")
+
+    def _compute_bezier_boundaries(self):
+        tw2 = float(self.track.track_width) / 2.0
+        tangents = self.track._cs_tangents
+        px = -np.sin(tangents) * tw2
+        py = np.cos(tangents) * tw2
+        self._outer_boundary = np.column_stack([self.track._cs_x + px, self.track._cs_y + py])
+        self._inner_boundary = np.column_stack([self.track._cs_x - px, self.track._cs_y - py])
+
+    def _draw_bezier_background(self):
+        tw = float(self.track.track_width)
+        n = len(self._outer_boundary)
+        cs_x = self.track._cs_x
+        cs_y = self.track._cs_y
+
+        outer = self._outer_boundary
+        inner = self._inner_boundary
+
+        path = Path(
+            np.vstack([outer, inner[::-1], outer[:1]]),
+            [Path.MOVETO] + [Path.LINETO] * (n - 1)
+            + [Path.MOVETO] + [Path.LINETO] * (n - 1)
+            + [Path.CLOSEPOLY],
+        )
+        self.ax.add_patch(
+            mpatches.PathPatch(path, facecolor="#dddddd", edgecolor="#888888", linewidth=1)
+        )
+
+        self.ax.plot(cs_x, cs_y, "--", color="#aaaaaa", linewidth=0.5, zorder=1)
+
+        gx, gy = self.track.goal_position
+        self.ax.plot(gx, gy, "o", color="#1a7c1a", markersize=8, zorder=1)
+
+        all_pts = np.vstack([outer, inner])
+        margin = tw
+        x_min, x_max = np.min(all_pts[:, 0]), np.max(all_pts[:, 0])
+        y_min, y_max = np.min(all_pts[:, 1]), np.max(all_pts[:, 1])
+        self.ax.set_xlim(x_min - margin, x_max + margin)
+        self.ax.set_ylim(y_min - margin, y_max + margin)
         self.ax.grid(True, alpha=0.3)
         self.ax.set_title("numpy-rl-racer")
 
