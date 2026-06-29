@@ -11,6 +11,9 @@ from numpy_rl_racer.env.wrappers import ActionRepeatEnv
 from numpy_rl_racer.utils.scheduler import ExponentialDecay, StepDecay
 
 
+ACCELERATING_ACTIONS = {0, 1, 2}
+
+
 def _load_config(config_path):
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
@@ -22,6 +25,44 @@ def _load_config(config_path):
     if not isinstance(config, dict):
         raise ValueError(f"Config file must contain a JSON object, got {type(config).__name__}")
     return config
+
+
+def _select_action(agent, state, training=True, allow_idle_actions=True):
+    if allow_idle_actions:
+        return agent.act(state, training=training)
+
+    allowed = np.array(sorted(ACCELERATING_ACTIONS), dtype=np.int64)
+    rng = agent.rng if agent.rng is not None else np.random
+    if training and rng.random() < agent.epsilon:
+        return int(rng.choice(allowed))
+
+    q_values = agent.online_net.forward(state.reshape(1, -1)).flatten()
+    return int(allowed[np.argmax(q_values[allowed])])
+
+
+def _evaluate_agent(agent, env, episodes, max_steps, seed, allow_idle_actions):
+    original_epsilon = agent.epsilon
+    agent.epsilon = 0.0
+    rewards = []
+    for i in range(episodes):
+        eval_seed = None if seed is None else seed + i
+        state = env.reset(seed=eval_seed)
+        total_reward = 0.0
+        for _ in range(max_steps):
+            action_idx = _select_action(
+                agent,
+                state,
+                training=False,
+                allow_idle_actions=allow_idle_actions,
+            )
+            next_state, reward, done, _ = env.step(ACTIONS[action_idx])
+            total_reward += reward
+            state = next_state
+            if done:
+                break
+        rewards.append(total_reward)
+    agent.epsilon = original_epsilon
+    return rewards
 
 
 def _generate_obstacles(track, num_obstacles, seed=None):
@@ -99,8 +140,8 @@ def main(argv=None):
     parser.add_argument("--save-dir", default="models", help="Directory to save model parameters")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
     parser.add_argument("--log-dir", default=None, help="Directory to save training log CSV")
-    parser.add_argument("--track", choices=["rectangular", "circular", "figure8"], default="rectangular",
-                        help="Track type to use (default: rectangular)")
+    parser.add_argument("--track", choices=["rectangular", "circular", "figure8"], default="circular",
+                        help="Track type to use (default: circular for the v0 baseline)")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
@@ -110,12 +151,14 @@ def main(argv=None):
     parser.add_argument("--epsilon-start", type=float, default=1.0,
                         help="Initial epsilon for exploration")
     parser.add_argument("--epsilon-min", type=float, default=0.01, help="Minimum epsilon")
-    parser.add_argument("--epsilon-decay", type=float, default=0.995,
+    parser.add_argument("--epsilon-decay", type=float, default=0.9995,
                         help="Epsilon decay rate per step")
     parser.add_argument("--target-update-freq", type=int, default=100,
                         help="Target network update frequency (steps)")
-    parser.add_argument("--no-double-dqn", action="store_true",
-                        help="Disable Double DQN (enabled by default)")
+    parser.add_argument("--double-dqn", action="store_true", default=False,
+                        help="Enable Double DQN (disabled by default for the v0 baseline)")
+    parser.add_argument("--no-double-dqn", action="store_false", dest="double_dqn",
+                        help=argparse.SUPPRESS)
     parser.add_argument("--use-per", action="store_true",
                         help="Enable Prioritized Experience Replay")
     parser.add_argument("--dueling-dqn", action="store_true",
@@ -132,16 +175,36 @@ def main(argv=None):
                         help="Run evaluation every N training episodes (0 = disabled)")
     parser.add_argument("--eval-episodes", type=int, default=5,
                         help="Number of evaluation episodes per eval run")
-    parser.add_argument("--no-randomize-start", action="store_false", dest="randomize_start", default=True,
-                        help="Disable randomized start position (default: enabled)")
+    parser.add_argument("--randomize-start", action="store_true", dest="randomize_start", default=False,
+                        help="Enable randomized starts. Disabled by default for the v0 baseline.")
+    parser.add_argument("--no-randomize-start", action="store_false", dest="randomize_start",
+                        help=argparse.SUPPRESS)
     parser.add_argument("--time-penalty", type=float, default=0.0,
                         help="Time penalty per second of elapsed time (default: 0.0)")
+    parser.add_argument("--step-penalty", type=float, default=0.0,
+                        help="Fixed reward penalty per step for progress reward mode (default: 0.0)")
+    parser.add_argument("--reward-mode", choices=["progress", "legacy"], default="progress",
+                        help="Reward mode: progress is the v0 baseline, legacy keeps old shaping")
+    parser.add_argument("--progress-reward-scale", type=float, default=10.0,
+                        help="Scale applied to progress delta in progress reward mode")
+    parser.add_argument("--lap-bonus", type=float, default=5.0,
+                        help="Bonus for completing a lap in progress reward mode")
+    parser.add_argument("--off-track-penalty", type=float, default=5.0,
+                        help="Penalty for leaving the track in progress reward mode")
+    parser.add_argument("--collision-penalty", type=float, default=5.0,
+                        help="Penalty for obstacle collisions in progress reward mode")
+    parser.add_argument("--observation-mode", choices=["local", "state"], default="local",
+                        help="Observation mode: local uses car-relative ray inputs for the v0 baseline")
+    parser.add_argument("--num-reward-lines", type=int, default=0,
+                        help="Checkpoint reward lines; default 0 for the v0 baseline")
     parser.add_argument("--num-obstacles", type=int, default=0,
                         help="Number of obstacles to place on the track (default: 0)")
     parser.add_argument("--obstacle-seed", type=int, default=None,
                         help="Seed for reproducible obstacle placement (default: None)")
     parser.add_argument("--skip-frames", type=int, default=1,
                         help="Number of times to repeat each action (default: 1)")
+    parser.add_argument("--allow-idle-actions", action="store_true", default=False,
+                        help="Allow coast/brake actions. Default v0 baseline uses accelerating actions only.")
 
     known_args, _ = parser.parse_known_args(argv)
     if known_args.config:
@@ -170,8 +233,20 @@ def main(argv=None):
         obstacles = _generate_obstacles(track, args.num_obstacles, args.obstacle_seed)
         print(f"Generated {len(obstacles)} obstacles (seed={args.obstacle_seed})")
 
-    env = RacingEnv(track=track, randomize_start=args.randomize_start,
-                    time_penalty=args.time_penalty, obstacles=obstacles)
+    env = RacingEnv(
+        track=track,
+        randomize_start=args.randomize_start,
+        time_penalty=args.time_penalty,
+        obstacles=obstacles,
+        num_reward_lines=args.num_reward_lines,
+        observation_mode=args.observation_mode,
+        reward_mode=args.reward_mode,
+        progress_reward_scale=args.progress_reward_scale,
+        lap_bonus=args.lap_bonus,
+        off_track_penalty=args.off_track_penalty,
+        collision_penalty=args.collision_penalty,
+        step_penalty=args.step_penalty,
+    )
 
     if args.skip_frames > 1:
         env = ActionRepeatEnv(env, skip_frames=args.skip_frames)
@@ -185,7 +260,7 @@ def main(argv=None):
         scheduler = ExponentialDecay(args.lr, args.lr_decay)
     elif args.lr_scheduler == "step":
         scheduler = StepDecay(args.lr, args.lr_decay, args.lr_drop_every)
-    state_dim = 8 if obstacles else 6
+    state_dim = env.observation_dim
     agent = DQNAgent(
         state_dim=state_dim,
         hidden_sizes=args.hidden_sizes,
@@ -197,7 +272,7 @@ def main(argv=None):
         buffer_size=args.buffer_size,
         batch_size=args.batch_size,
         target_update_freq=args.target_update_freq,
-        use_double_dqn=not args.no_double_dqn,
+        use_double_dqn=args.double_dqn,
         use_per=args.use_per,
         use_dueling_dqn=args.dueling_dqn,
         n_step=args.n_step,
@@ -211,9 +286,11 @@ def main(argv=None):
         f"hidden_sizes={args.hidden_sizes}, buffer_size={args.buffer_size}, "
         f"epsilon_start={args.epsilon_start}, epsilon_min={args.epsilon_min}, "
         f"epsilon_decay={args.epsilon_decay}, target_update_freq={args.target_update_freq}, "
-        f"double_dqn={not args.no_double_dqn}, use_per={args.use_per}, "
+        f"double_dqn={args.double_dqn}, use_per={args.use_per}, "
         f"dueling_dqn={args.dueling_dqn}, n_step={args.n_step}, "
-        f"lr_scheduler={scheduler_str}"
+        f"lr_scheduler={scheduler_str}, observation_mode={args.observation_mode}, "
+            f"reward_mode={args.reward_mode}, state_dim={state_dim}, "
+            f"allow_idle_actions={args.allow_idle_actions}"
     )
 
     _ctx = nullcontext()
@@ -232,6 +309,7 @@ def main(argv=None):
     episode_rewards = []
     episode_losses = []
     best_reward = -float("inf")
+    best_eval_reward = -float("inf")
     eval_at_episodes = []
     eval_reward_means = []
     eval_reward_stds = []
@@ -247,7 +325,12 @@ def main(argv=None):
             ep_q_vals = []
 
             for step in range(args.max_steps):
-                action_idx = agent.act(state)
+                action_idx = _select_action(
+                    agent,
+                    state,
+                    training=True,
+                    allow_idle_actions=args.allow_idle_actions,
+                )
                 next_state, reward, done, info = env.step(ACTIONS[action_idx])
                 loss = agent.train_step(state, action_idx, reward, next_state, done)
                 ep_reward += reward
@@ -284,23 +367,17 @@ def main(argv=None):
                 log_kwargs["lr"] = agent.optimizer.lr
 
             if args.eval_freq > 0 and ep % args.eval_freq == 0:
-                original_epsilon = agent.epsilon
-                agent.epsilon = 0.0
-                _eval_rewards = []
-                for _ in range(args.eval_episodes):
-                    state = env.reset(seed=args.seed)
-                    if args.seed is not None:
-                        args.seed += 1
-                    _ep_eval_reward = 0.0
-                    for _ in range(args.max_steps):
-                        action_idx = agent.act(state)
-                        next_state, reward, done, _ = env.step(ACTIONS[action_idx])
-                        _ep_eval_reward += reward
-                        state = next_state
-                        if done:
-                            break
-                    _eval_rewards.append(_ep_eval_reward)
-                agent.epsilon = original_epsilon
+                eval_seed = None if args.seed is None else args.seed
+                _eval_rewards = _evaluate_agent(
+                    agent,
+                    env,
+                    args.eval_episodes,
+                    args.max_steps,
+                    eval_seed,
+                    args.allow_idle_actions,
+                )
+                if args.seed is not None:
+                    args.seed += args.eval_episodes
                 eval_mean = np.mean(_eval_rewards)
                 eval_std = np.std(_eval_rewards)
                 eval_at_episodes.append(ep)
@@ -309,16 +386,22 @@ def main(argv=None):
                 print(f"  eval: reward={eval_mean:.2f} +/- {eval_std:.2f}")
                 log_kwargs["eval_reward_mean"] = eval_mean
                 log_kwargs["eval_reward_std"] = eval_std
+                if eval_mean > best_eval_reward:
+                    best_eval_reward = eval_mean
+                    agent.save(os.path.join(args.save_dir, "best_model.npz"))
 
             if logger:
                 logger.log(**log_kwargs)
 
-            if ep_reward > best_reward:
+            if args.eval_freq == 0 and ep_reward > best_reward:
                 best_reward = ep_reward
                 agent.save(os.path.join(args.save_dir, "best_model.npz"))
 
     agent.save(os.path.join(args.save_dir, "final_model.npz"))
-    print(f"\nTraining complete. Best reward: {best_reward:.2f}")
+    if args.eval_freq > 0:
+        print(f"\nTraining complete. Best eval reward: {best_eval_reward:.2f}")
+    else:
+        print(f"\nTraining complete. Best reward: {best_reward:.2f}")
     print(f"Models saved to {args.save_dir}/")
 
     plot_training(episode_rewards, episode_losses, args.save_dir,

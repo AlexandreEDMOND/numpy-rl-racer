@@ -363,6 +363,14 @@ def test_racing_env_with_circular_track_reset():
     assert obs.shape == (6,)
 
 
+def test_racing_env_circular_track_type():
+    env = RacingEnv(track_type='circular')
+    assert isinstance(env.track, CircularTrack)
+    obs = env.reset(seed=42)
+    assert isinstance(obs, np.ndarray)
+    assert not np.any(np.isnan(obs))
+
+
 def test_circular_track_progress_increases_when_moving_forward():
     track = CircularTrack(radius=8.0, track_width=2.0)
     env = RacingEnv(track=track, dt=0.1)
@@ -517,6 +525,42 @@ def test_distance_to_edge_normalized_zero_at_boundary_circular():
     env.state = CarState(x=0.0, y=-7.0, heading=0.0, velocity=0.0)
     obs = env._get_observation()
     np.testing.assert_almost_equal(obs[4], 0.0)
+
+
+def test_local_observation_has_nine_features():
+    env = RacingEnv(observation_mode="local")
+    obs = env.reset(seed=42)
+    assert obs.shape == (9,)
+    assert obs.dtype == np.float64
+
+
+def test_local_observation_values_are_bounded():
+    env = RacingEnv(observation_mode="local")
+    obs = env.reset(seed=42)
+    speed_norm = obs[0]
+    sin_heading_error = obs[1]
+    cos_heading_error = obs[2]
+    dist_to_edge = obs[3]
+    rays = obs[4:]
+    assert 0.0 <= speed_norm <= 1.0
+    assert -1.0 <= sin_heading_error <= 1.0
+    assert -1.0 <= cos_heading_error <= 1.0
+    assert 0.0 <= dist_to_edge <= 1.0
+    assert np.all(rays >= 0.0) and np.all(rays <= 1.0)
+
+
+def test_progress_reward_stationary_is_zero_by_default():
+    env = RacingEnv(reward_mode="progress", randomize_start=False, num_reward_lines=0)
+    env.reset(seed=42)
+    _, reward, _, _ = env.step(np.array([0.0, 0.0]))
+    np.testing.assert_almost_equal(reward, 0.0)
+
+
+def test_progress_reward_forward_movement_positive():
+    env = RacingEnv(reward_mode="progress", randomize_start=False, num_reward_lines=0)
+    env.reset(seed=42)
+    _, reward, _, _ = env.step(np.array([0.0, 2.0]))
+    assert reward > 0.0
 
 
 # ── Randomized start ─────────────────────────────────────────────────

@@ -1,11 +1,16 @@
 import argparse
+import json
 import os
+import time
 
 import numpy as np
 
 from numpy_rl_racer.agent import DQNAgent, ACTIONS
-from numpy_rl_racer.env import CircularTrack, RacingEnv
+from numpy_rl_racer.env import CircularTrack, Figure8Track, Obstacle, RacingEnv, RectangularTrack
 from numpy_rl_racer.rendering import MatplotlibRenderer
+
+
+ACCELERATING_ACTIONS = {0, 1, 2}
 
 
 def _infer_state_dim(path):
@@ -13,29 +18,117 @@ def _infer_state_dim(path):
     return data["layer_0_w"].shape[0]
 
 
+def _load_config(path):
+    with open(path) as f:
+        return json.load(f)
+
+
+def _generate_obstacles(track, num_obstacles, seed=None):
+    rng = np.random.RandomState(seed)
+    obstacles = []
+    if hasattr(track, 'radius'):
+        radius = float(track.radius)
+        inner_r = radius - track.track_width
+        for _ in range(num_obstacles):
+            angle = rng.uniform(0, 2 * np.pi)
+            dist = rng.uniform(0, inner_r * 0.85)
+            obstacles.append(Obstacle(
+                dist * np.cos(angle),
+                dist * np.sin(angle),
+                rng.uniform(0.3, 0.5),
+            ))
+    else:
+        hw = float(track.half_w)
+        hh = float(track.half_h)
+        inner_hw = hw - track.track_width
+        inner_hh = hh - track.track_width
+        for _ in range(num_obstacles):
+            obstacles.append(Obstacle(
+                rng.uniform(-inner_hw * 0.85, inner_hw * 0.85),
+                rng.uniform(-inner_hh * 0.85, inner_hh * 0.85),
+                rng.uniform(0.3, 0.5),
+            ))
+    return obstacles
+
+
+def _make_track(track_name):
+    if track_name == "circular":
+        return CircularTrack(radius=6.0, track_width=2.0)
+    if track_name == "figure8":
+        return Figure8Track(radius=6.0, track_width=2.0)
+    return RectangularTrack(width=10.0, height=8.0, track_width=2.0)
+
+
+def _make_env(args, config):
+    track_name = args.track if args.track is not None else config.get("track", "rectangular")
+    track = _make_track(track_name)
+    num_obstacles = int(config.get("num_obstacles", 0))
+    obstacles = None
+    if num_obstacles > 0:
+        obstacles = _generate_obstacles(track, num_obstacles, config.get("obstacle_seed"))
+
+    env = RacingEnv(
+        track=track,
+        randomize_start=config.get("randomize_start", True),
+        time_penalty=config.get("time_penalty", 0.0),
+        obstacles=obstacles,
+        num_reward_lines=config.get("num_reward_lines", 0),
+        observation_mode=config.get("observation_mode", "state"),
+        reward_mode=config.get("reward_mode", "legacy"),
+        progress_reward_scale=config.get("progress_reward_scale", 10.0),
+        lap_bonus=config.get("lap_bonus", 5.0),
+        off_track_penalty=config.get("off_track_penalty", 5.0),
+        collision_penalty=config.get("collision_penalty", 5.0),
+        step_penalty=config.get("step_penalty", 0.0),
+    )
+    return env, track_name
+
+
+def _select_action(agent, state, allow_idle_actions=True):
+    if allow_idle_actions:
+        return agent.act(state, training=False)
+
+    allowed = np.array(sorted(ACCELERATING_ACTIONS), dtype=np.int64)
+    q_values = agent.online_net.forward(state.reshape(1, -1)).flatten()
+    return int(allowed[np.argmax(q_values[allowed])])
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Evaluate a trained DQN agent in the RacingEnv.")
     parser.add_argument("--model-path", default="models/best_model.npz", help="Path to saved model parameters")
+    parser.add_argument("--config", default=None,
+                        help="Path to training config JSON. Defaults to config.json next to the model.")
     parser.add_argument("--episodes", type=int, default=3, help="Number of evaluation episodes")
     parser.add_argument("--max-steps", type=int, default=200, help="Max steps per episode")
     parser.add_argument("--save-dir", default="images", help="Directory to save rendered images")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for evaluation")
-    parser.add_argument("--track", choices=["rectangular", "circular"], default="rectangular",
-                        help="Track type to use (default: rectangular)")
+    parser.add_argument("--track", choices=["rectangular", "circular", "figure8"], default=None,
+                        help="Override track type from config")
     parser.add_argument("--headless", action="store_true", help="Run in headless mode (no GUI window)")
+    parser.add_argument("--live", action="store_true",
+                        help="Show the rollout in a live Matplotlib window")
+    parser.add_argument("--fps", type=int, default=20, help="Playback FPS in live mode")
     parser.add_argument("--gif", "--save-gif", action="store_true",
                         help="Record and save GIF animation of each evaluation episode")
     args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
 
-    if args.track == "circular":
-        track = CircularTrack(radius=6.0, track_width=2.0)
-        env = RacingEnv(track=track)
-    else:
-        env = RacingEnv()
+    config_path = args.config
+    if config_path is None:
+        candidate = os.path.join(os.path.dirname(args.model_path), "config.json")
+        config_path = candidate if os.path.exists(candidate) else None
+    config = _load_config(config_path) if config_path else {}
 
-    print(f"Track type: {args.track}")
+    if args.live:
+        args.headless = False
+
+    env, track_name = _make_env(args, config)
+    allow_idle_actions = config.get("allow_idle_actions", True)
+
+    print(f"Track type: {track_name}")
+    print(f"Observation mode: {env.observation_mode}  Reward mode: {env.reward_mode}")
+    print(f"Allow idle actions: {allow_idle_actions}")
     data = np.load(args.model_path)
     if "arch_type" in data:
         arch_type = int(data["arch_type"])
@@ -52,6 +145,12 @@ def main(argv=None):
         agent = DQNAgent(state_dim=state_dim)
     agent.load(args.model_path)
     agent.epsilon = 0.0
+
+    if env.observation_dim != agent.state_dim:
+        raise ValueError(
+            f"Model expects state_dim={agent.state_dim}, but evaluation env produces "
+            f"{env.observation_dim}. Use the training config that matches this model."
+        )
 
     renderer = MatplotlibRenderer(
         env.track,
@@ -72,7 +171,7 @@ def main(argv=None):
         reward = 0.0
         info = {"lap_count": env.lap_count, "reward_lines_crossed": 0}
         for step in range(args.max_steps):
-            action_idx = agent.act(state, training=False)
+            action_idx = _select_action(agent, state, allow_idle_actions=allow_idle_actions)
             next_state, reward, done, info = env.step(ACTIONS[action_idx])
             ep_reward += reward
             renderer.render(
@@ -80,9 +179,12 @@ def main(argv=None):
                 step=step,
                 reward=reward,
                 total_reward=ep_reward,
+                obstacles=env.obstacles,
                 lap_count=info.get("lap_count"),
                 reward_lines_crossed=info.get("reward_lines_crossed"),
             )
+            if args.live and args.fps > 0:
+                time.sleep(1.0 / args.fps)
             state = next_state
             if done:
                 break
@@ -96,6 +198,7 @@ def main(argv=None):
             step=step,
             reward=reward,
             total_reward=ep_reward,
+            obstacles=env.obstacles,
             lap_count=info.get("lap_count"),
             reward_lines_crossed=info.get("reward_lines_crossed"),
         )
@@ -109,6 +212,8 @@ def main(argv=None):
             print(f"  Saved {gif_path}")
             renderer.stop_recording()
 
+    if args.live:
+        renderer.show()
     renderer.close()
 
     print(

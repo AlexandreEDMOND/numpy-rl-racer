@@ -31,9 +31,10 @@ class RectangularTrack:
     def start_position(self):
         return (np.float64(0.0), -self.half_h, np.float64(0.0))
 
-    def sample_centerline_point(self):
+    def sample_centerline_point(self, rng=None):
+        rng = np.random if rng is None else rng
         hw, hh = self.half_w, self.half_h
-        r = np.random.uniform(0.0, self._perimeter)
+        r = rng.uniform(0.0, self._perimeter)
         cum = np.float64(0.0)
         for x1, y1, x2, y2 in _centerline_edges(hw, hh):
             sx = x2 - x1
@@ -157,8 +158,9 @@ class CircularTrack:
     def start_position(self):
         return (np.float64(0.0), -self.radius, np.float64(0.0))
 
-    def sample_centerline_point(self):
-        theta = np.random.uniform(0.0, 2.0 * np.pi)
+    def sample_centerline_point(self, rng=None):
+        rng = np.random if rng is None else rng
+        theta = rng.uniform(0.0, 2.0 * np.pi)
         x = self.radius * np.sin(theta)
         y = -self.radius * np.cos(theta)
         return (x, y, theta)
@@ -228,9 +230,10 @@ class Figure8Track:
     def half_h(self):
         return self.radius * np.float64(0.5)
 
-    def sample_centerline_point(self, t=None):
+    def sample_centerline_point(self, t=None, rng=None):
+        rng = np.random if rng is None else rng
         if t is None:
-            t = np.random.uniform(0.0, 1.0)
+            t = rng.uniform(0.0, 1.0)
         theta = 2.0 * np.pi * t + self._theta_offset
         x = self.radius * np.cos(theta)
         y = self.radius * np.sin(theta) * np.cos(theta)
@@ -269,18 +272,57 @@ class Figure8Track:
 
 
 class RacingEnv:
-    def __init__(self, track_width=10.0, track_height=8.0, track_road_width=2.0, dt=0.1, track=None, track_type='rectangular', randomize_start=True, obstacles=None, time_penalty=0.0, num_reward_lines=10, reward_line_reward=0.5, use_lidar=False, num_lidar_rays=8, lidar_max_range=10.0):
+    def __init__(
+        self,
+        track_width=10.0,
+        track_height=8.0,
+        track_road_width=2.0,
+        dt=0.1,
+        track=None,
+        track_type='rectangular',
+        randomize_start=True,
+        obstacles=None,
+        time_penalty=0.0,
+        num_reward_lines=10,
+        reward_line_reward=0.5,
+        use_lidar=False,
+        num_lidar_rays=8,
+        lidar_max_range=10.0,
+        observation_mode="state",
+        reward_mode="legacy",
+        local_ray_angles=None,
+        progress_reward_scale=10.0,
+        lap_bonus=5.0,
+        off_track_penalty=5.0,
+        collision_penalty=5.0,
+        step_penalty=0.0,
+    ):
         if track is not None:
             self.track = track
+        elif track_type == 'circular':
+            radius = min(track_width, track_height) / 2.0
+            self.track = CircularTrack(radius, track_road_width)
         elif track_type == 'figure8':
             radius = min(track_width, track_height) / 2.0
             self.track = Figure8Track(radius, track_road_width)
         else:
             self.track = RectangularTrack(track_width, track_height, track_road_width)
+        if observation_mode not in ("state", "local"):
+            raise ValueError(f"observation_mode must be 'state' or 'local', got {observation_mode!r}")
+        if reward_mode not in ("legacy", "progress"):
+            raise ValueError(f"reward_mode must be 'legacy' or 'progress', got {reward_mode!r}")
         self.randomize_start = randomize_start
         self.car = KinematicCar()
         self.dt = np.float64(dt)
         self.time_penalty = np.float64(time_penalty)
+        self.observation_mode = observation_mode
+        self.reward_mode = reward_mode
+        self.progress_reward_scale = np.float64(progress_reward_scale)
+        self.lap_bonus = np.float64(lap_bonus)
+        self.off_track_penalty = np.float64(off_track_penalty)
+        self.collision_penalty = np.float64(collision_penalty)
+        self.step_penalty = np.float64(step_penalty)
+        self.rng = np.random.RandomState()
         self.state = None
         self.current_progress = np.float64(0.0)
         self.prev_progress = np.float64(0.0)
@@ -301,7 +343,20 @@ class RacingEnv:
         self.num_lidar_rays = num_lidar_rays
         self.lidar_max_range = np.float64(lidar_max_range)
         self._lidar_angles = np.linspace(0, 2 * np.pi, num_lidar_rays, endpoint=False).astype(np.float64)
+        if local_ray_angles is None:
+            local_ray_angles = [np.pi / 2.0, np.pi / 4.0, 0.0, -np.pi / 4.0, -np.pi / 2.0]
+        self.local_ray_angles = np.asarray(local_ray_angles, dtype=np.float64)
         self._lidar_boundary_segments = self._compute_lidar_boundary_segments()
+
+    @property
+    def observation_dim(self):
+        if self.observation_mode == "local":
+            return 4 + len(self.local_ray_angles)
+        if self.use_lidar:
+            return 6 + self.num_lidar_rays
+        if self.obstacles:
+            return 8
+        return 6
 
     @property
     def goal_position(self):
@@ -309,13 +364,13 @@ class RacingEnv:
 
     def reset(self, seed=None, randomize_start=None):
         if seed is not None:
-            np.random.seed(seed)
+            self.rng = np.random.RandomState(seed)
         if randomize_start is None:
             randomize_start = self.randomize_start
         if randomize_start:
-            cx, cy, tangent = self.track.sample_centerline_point()
+            cx, cy, tangent = self.track.sample_centerline_point(rng=self.rng)
             max_lateral = np.float64(0.2) * self.track.track_width
-            lateral = np.random.uniform(-max_lateral, max_lateral)
+            lateral = self.rng.uniform(-max_lateral, max_lateral)
             perp_angle = tangent + np.pi / np.float64(2.0)
             sx = cx + lateral * np.cos(perp_angle)
             sy = cy + lateral * np.sin(perp_angle)
@@ -346,33 +401,44 @@ class RacingEnv:
         self.prev_progress = self.current_progress
         self.current_progress = self.track.progress_along_centerline(self.state.x, self.state.y)
 
-        reward = np.float64(0.1 if on_track else -1.0)
-        if obstacle_collision:
-            reward += np.float64(-1.0)
-
         progress_diff = self.current_progress - self.prev_progress
         lap_completed = progress_diff < -np.float64(0.5)
-
-        # Check reward line crossings
-        for i, lp in enumerate(self._reward_line_progress):
-            if self._collected_reward_lines[i]:
-                continue
-            crossed = False
-            if self.prev_progress <= lp < self.current_progress:
-                crossed = True
-            elif lap_completed and (lp >= self.prev_progress or lp <= self.current_progress):
-                crossed = True
-            if crossed:
-                reward += self.reward_line_reward
-                self._collected_reward_lines[i] = True
-
         if lap_completed:
             progress_diff += np.float64(1.0)
-            self.lap_count += 1
-            reward += np.float64(1.0)
-            self._collected_reward_lines[:] = False
-        reward += np.float64(0.5) * progress_diff
 
+        if self.reward_mode == "progress":
+            reward = self.progress_reward_scale * progress_diff - self.step_penalty
+            if not on_track:
+                reward -= self.off_track_penalty
+            if obstacle_collision:
+                reward -= self.collision_penalty
+            if lap_completed:
+                reward += self.lap_bonus
+        else:
+            reward = np.float64(0.1 if on_track else -1.0)
+            if obstacle_collision:
+                reward += np.float64(-1.0)
+
+            # Check reward line crossings
+            for i, lp in enumerate(self._reward_line_progress):
+                if self._collected_reward_lines[i]:
+                    continue
+                crossed = False
+                if self.prev_progress <= lp < self.current_progress:
+                    crossed = True
+                elif lap_completed and (lp >= self.prev_progress or lp <= self.current_progress):
+                    crossed = True
+                if crossed:
+                    reward += self.reward_line_reward
+                    self._collected_reward_lines[i] = True
+
+            reward += np.float64(0.5) * progress_diff
+
+        if lap_completed:
+            self.lap_count += 1
+            if self.reward_mode == "legacy":
+                reward += np.float64(1.0)
+            self._collected_reward_lines[:] = False
         reward -= self.time_penalty * self.dt
 
         info = {
@@ -395,7 +461,7 @@ class RacingEnv:
         return False
 
     def _compute_lidar_boundary_segments(self):
-        if not self.use_lidar:
+        if not self.use_lidar and self.observation_mode != "local":
             return np.empty((0, 2, 2), dtype=np.float64)
 
         segments = []
@@ -451,12 +517,18 @@ class RacingEnv:
         return np.array(segments, dtype=np.float64)
 
     def _lidar_readings(self):
+        return self._ray_readings(self._lidar_angles)
+
+    def _local_ray_readings(self):
+        return self._ray_readings(self.local_ray_angles)
+
+    def _ray_readings(self, relative_angles):
         origin = np.array([self.state.x, self.state.y], dtype=np.float64)
         heading = self.state.heading
-        angles = self._lidar_angles + heading
+        angles = relative_angles + heading
         dirs = np.column_stack([np.cos(angles), np.sin(angles)])
 
-        num_rays = self.num_lidar_rays
+        num_rays = len(relative_angles)
         max_range = self.lidar_max_range
         min_dists = np.full(num_rays, max_range, dtype=np.float64)
 
@@ -500,6 +572,16 @@ class RacingEnv:
             dist_to_edge / half_tw, np.float64(0.0), np.float64(1.0)
         )
         heading_error = normalize_angle(self.state.heading - tangent_angle)
+
+        if self.observation_mode == "local":
+            speed_norm = self.state.velocity / self.car.max_speed
+            return np.array([
+                speed_norm,
+                np.sin(heading_error),
+                np.cos(heading_error),
+                dist_to_edge_normalized,
+                *self._local_ray_readings().tolist(),
+            ], dtype=np.float64)
 
         obs = [
             self.state.x,

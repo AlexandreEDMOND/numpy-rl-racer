@@ -15,7 +15,7 @@ from numpy_rl_racer.env import CircularTrack, Obstacle, RacingEnv, RectangularTr
 
 def _parse_track(args=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--track", choices=["rectangular", "circular", "figure8"], default="rectangular")
+    parser.add_argument("--track", choices=["rectangular", "circular", "figure8"], default="circular")
     parsed = parser.parse_args(args)
     if parsed.track == "circular":
         track = CircularTrack(radius=6.0, track_width=2.0)
@@ -28,10 +28,10 @@ def _parse_track(args=None):
         return RacingEnv(), parsed.track
 
 
-def test_default_track_is_rectangular():
+def test_default_track_is_circular():
     env, track_type = _parse_track([])
-    assert track_type == "rectangular"
-    assert isinstance(env.track, RectangularTrack)
+    assert track_type == "circular"
+    assert isinstance(env.track, CircularTrack)
 
 
 def test_explicit_rectangular_track():
@@ -274,7 +274,7 @@ def test_train_hyperparameters_passed_to_agent(tmp_path):
         ])
 
     kwargs = captured[0]
-    assert kwargs["state_dim"] == 6
+    assert kwargs["state_dim"] == 9
     assert kwargs["lr"] == 0.0005
     assert kwargs["batch_size"] == 128
     assert kwargs["gamma"] == 0.95
@@ -316,9 +316,9 @@ def test_train_default_hyperparameters(tmp_path):
     assert kwargs["buffer_size"] == 10000
     assert kwargs["epsilon"] == 1.0
     assert kwargs["epsilon_min"] == 0.01
-    assert kwargs["epsilon_decay"] == 0.995
+    assert kwargs["epsilon_decay"] == 0.9995
     assert kwargs["target_update_freq"] == 100
-    assert kwargs["use_double_dqn"] is True
+    assert kwargs["use_double_dqn"] is False
     assert kwargs["use_per"] is False
     assert kwargs["use_dueling_dqn"] is False
 
@@ -416,6 +416,7 @@ def test_epsilon_restored_after_eval(tmp_path):
             "--eval-episodes", "2",
             "--epsilon-start", "0.5",
             "--epsilon-decay", "1.0",
+            "--allow-idle-actions",
         ])
     assert len(epsilon_values) == 5  # 3 training + 2 eval acts
     assert epsilon_values[0] == 0.5  # ep 1 training
@@ -583,6 +584,30 @@ def test_script_randomize_start_cli(tmp_path):
     assert env_kwargs[0].get("randomize_start") is False
 
 
+def test_script_randomize_start_enabled_cli(tmp_path):
+    main = _make_main()
+    env_kwargs = []
+    real_init = RacingEnv.__init__
+
+    def tracking_init(self, **kwargs):
+        env_kwargs.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(RacingEnv, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--randomize-start",
+        ])
+
+    assert len(env_kwargs) == 1
+    assert env_kwargs[0].get("randomize_start") is True
+
+
 def test_config_not_required(tmp_path):
     main = _make_main()
     captured = []
@@ -636,7 +661,7 @@ def test_obstacles_default_none(tmp_path):
 
     assert env_kwargs[0].get("obstacles") is None
     assert len(env_kwargs[0].get("obstacles") if env_kwargs[0].get("obstacles") else []) == 0
-    assert agent_kwargs[0]["state_dim"] == 6
+    assert agent_kwargs[0]["state_dim"] == 9
 
 
 def test_obstacles_num_obstacles_3(tmp_path):
@@ -672,7 +697,7 @@ def test_obstacles_num_obstacles_3(tmp_path):
     assert len(obstacles) == 3
     for obs in obstacles:
         assert isinstance(obs, Obstacle)
-    assert agent_kwargs[0]["state_dim"] == 8
+    assert agent_kwargs[0]["state_dim"] == 9
 
 
 def test_obstacles_seed_determinism(tmp_path):

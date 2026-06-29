@@ -1,46 +1,40 @@
 # NumPy RL Racer
 
-A from-scratch Deep Reinforcement Learning project where a small autonomous car learns to navigate 2D tracks using only NumPy. No PyTorch, TensorFlow, JAX, Gymnasium, or any external RL library.
+A small from-scratch reinforcement learning racing project built with **NumPy only**.
+No PyTorch, TensorFlow, JAX, Gymnasium, or external RL library.
 
-## What this repo is about
-
-This project implements every component of a deep RL system — kinematic car physics, track geometries, neural networks, optimisers, and DQN-based agents — using **NumPy only**. It serves as:
-
-- A **learning resource** for understanding how deep RL works under the hood, from gradient descent through Q-learning to modern improvements like Double DQN, Dueling networks, Prioritised Experience Replay, Noisy Networks, and N-step returns.
-- An **educational benchmark** for experimenting with RL algorithms in a simple, self-contained 2D racing environment.
+The stable baseline is intentionally simple: a DQN agent learns to drive a small
+2D car around a circular track using local, car-relative observations and a
+progress-based reward. Extra experiments such as rectangular/figure-8 tracks,
+obstacles, PER, Dueling DQN, NoisyNet, N-step returns, and GIF comparison tools
+still exist in the repo, but they are not the default path.
 
 ## Features
 
-**Environment:**
-- Kinematic bicycle-model car with steering, acceleration, speed limits
-- Multiple track types: rectangular, circular, figure-8
-- Configurable track width, obstacles, randomised start positions
-- Lap-based reward with progress tracking and reward lines (checkpoint gates)
-- Observation includes position, heading, velocity, distance-to-edge, heading error, and optional obstacle sensing
+**Stable v0 baseline:**
+- Kinematic car with steering, acceleration, braking, and speed limits
+- Circular track by default for stable first training
+- Local observation vector: speed, heading error as sin/cos, distance to edge, and 5 ray distances
+- Progress-based reward: forward progress, lap bonus, off-track penalty
+- Plain DQN with replay buffer and target network
+- No-idle action baseline: the default policy space only uses the three accelerating actions
+- Matplotlib live viewer for watching a trained agent
+- Training logs, checkpoints, and learning curves
 
-**Agent & Algorithms:**
-- DQN with experience replay buffer
-- Double DQN (reduces Q-value overestimation)
-- Dueling DQN architecture (separate value & advantage streams)
-- Prioritised Experience Replay (PER) with SumTree
-- Noisy Networks for exploration (replaces epsilon-greedy)
-- N-step returns for TD targets
-- Soft/hard target network updates
+**Experimental extensions:**
+- Rectangular and figure-8 tracks
+- Obstacles and collision penalties
+- Legacy global-state observations
+- Reward lines/checkpoint bonuses
+- Double DQN, Dueling DQN, PER, NoisyNet, N-step returns
+- Grid search and policy comparison GIF tooling
 
-**Neural Networks (NumPy only):**
-- Configurable MLP with ReLU activations
-- Dueling MLP architecture
-- SGD optimiser with momentum & gradient clipping
-- Adam optimiser with weight decay
-- Learning rate schedulers (exponential, step decay)
-- NoisyLinear layers for NoisyNet
-
-**Tooling:**
-- Matplotlib-based renderer (headless & interactive modes)
-- Training script with configurable hyperparameters, logging, CSV export
-- Evaluation script with rollout rendering and screenshot export
-- Grid search script for hyperparameter tuning
-- Comprehensive test suite
+**Neural networks (NumPy only):**
+- MLP and Dueling MLP
+- Dense and NoisyLinear layers
+- SGD with momentum and gradient clipping
+- Adam with weight decay
+- Learning-rate schedulers
 
 ## Environment Overview
 
@@ -50,29 +44,28 @@ Three track types are available, each with a **start/finish line** (green star m
 
 ![Environment overview](images/environment_overview.png)
 
-**What the agent observes** (6-dimensional vector):
+**What the default v0 agent observes** (9-dimensional local vector):
 | Observation | Description |
 |---|---|
-| `x`, `y` | Car position in world coordinates |
-| `heading` | Car orientation in radians |
-| `velocity` | Forward speed (0 to max_speed) |
-| `dist_to_edge` | Normalized distance to nearest road edge (0 = at edge, 1 = on centerline) |
-| `heading_error` | Angle between the car heading and the centerline tangent |
+| `speed_norm` | Forward speed normalized by max speed |
+| `sin_heading_error`, `cos_heading_error` | Car heading relative to the track tangent |
+| `dist_to_edge` | Normalized distance to nearest road edge |
+| `left_ray`, `front_left_ray`, `front_ray`, `front_right_ray`, `right_ray` | Local ray distances to track boundaries or obstacles |
 
 **What the agent can do** (5 discrete actions):
 | Action | Steering | Acceleration |
 |---|---|---|
-| Steer left + accelerate | -0.5 | +1.0 |
-| Steer right + accelerate | +0.5 | +1.0 |
+| Steer left + accelerate | -1.5 | +1.0 |
+| Steer right + accelerate | +1.5 | +1.0 |
 | Go straight + accelerate | 0.0 | +1.0 |
 | Coast | 0.0 | 0.0 |
 | Brake | 0.0 | -0.5 |
 
-**Reward structure:**
-- **+0.1** per step while on the track
-- **+1.0** for completing a lap
-- **+0.5** per reward line (checkpoint gate) crossed
-- **-1.0** for driving off the track or colliding with an obstacle (episode ends)
+**Default v0 reward:**
+- Positive reward for forward progress along the centerline
+- Bonus for completing a lap
+- Penalty for leaving the track
+- Optional step, time, and collision penalties
 
 ## Quickstart
 
@@ -90,12 +83,15 @@ uv run ruff check .
 ## Usage
 
 ```bash
-# Train the DQN agent (default rectangular track)
-uv run python scripts/train.py --episodes 300
+# Train the v0 DQN baseline
+uv run python scripts/train.py --episodes 500 --max-steps 300 --eval-freq 50 --eval-episodes 3 --save-dir models/v0 --log-dir logs/v0 --seed 0
 
-# Train with circular track, obstacles, and Dueling DQN
+# Watch a trained agent live
+uv run python scripts/evaluate.py --model-path models/v0/best_model.npz --live --episodes 1 --max-steps 400 --fps 30
+
+# Experimental: train with rectangular track, obstacles, and Dueling DQN
 uv run python scripts/train.py \
-  --track circular \
+  --track rectangular \
   --num-obstacles 5 \
   --dueling-dqn \
   --episodes 500
@@ -103,8 +99,8 @@ uv run python scripts/train.py \
 # Train with a JSON config file
 uv run python scripts/train.py --config my_config.json
 
-# Evaluate a trained policy
-uv run python scripts/evaluate.py --model-path models/best_model.npz
+# Evaluate headlessly and save final frames
+uv run python scripts/evaluate.py --model-path models/v0/best_model.npz --headless
 
 # Grid search over hyperparameters
 uv run python scripts/grid_search.py
@@ -115,7 +111,7 @@ uv run python scripts/demo_render_env.py
 
 ## Training Results
 
-The DQN agent was trained for 100 episodes on the default rectangular track. The training curve below shows the episode reward and average loss.
+The DQN agent was trained on the default circular v0 track. The training curve below shows the episode reward and average loss.
 
 ![Training curve](images/training_curve.png)
 
@@ -141,19 +137,24 @@ Forbidden ML/RL dependencies:
 
 ## Roadmap
 
-### ✅ Implemented
+### Stable
 
 1. **Project skeleton** — Python package structure (`pyproject.toml`, `src/`, `tests/`).
-2. **2D car physics** — `KinematicCar` / `CarState`: position, heading, velocity, steering, acceleration, speed limits, heading normalisation.
-3. **Track representation** — `RectangularTrack`, `CircularTrack`, `Figure8Track` with configurable road width and point-to-segment distance checking.
-4. **Racing environment API** — `RacingEnv` with `reset(seed)` / `step(action)` returning `(obs, reward, done, info)`; episode ends when the car leaves the track or collides with an obstacle.
-5. **Visualization** — `MatplotlibRenderer`: top-down plot of the track with car position, heading arrow, step counter, and reward overlay. Supports headless mode.
-6. **NumPy neural network** — Feed-forward network (`Dense`, ReLU, optional output activation), Dueling MLP, backward pass with NumPy-only gradient descent.
-7. **DQN from scratch** — DQN with experience replay, epsilon-greedy, target network, Q-learning loss — all NumPy-only. Includes Double DQN, Dueling DQN, NoisyNet, PER, N-step returns.
-8. **Optimisers** — SGD with momentum & gradient clipping, Adam with weight decay.
-9. **Training and evaluation scripts** — `scripts/train.py` trains the DQN agent, logs rewards/losses, saves models, and plots training curves. `scripts/evaluate.py` loads a trained model, renders evaluation rollouts, and saves screenshots.
-10. **Grid search** — `scripts/grid_search.py` for hyperparameter tuning.
-11. **Checkpointing** — Full save/load of model parameters, optimiser state, replay buffer, RNG state, and training metadata.
+2. **2D car physics** — `KinematicCar` / `CarState`.
+3. **Circular racing baseline** — reset/step API, progress, laps, off-track termination.
+4. **Local observations** — speed, heading error, distance-to-edge, and 5 ray distances.
+5. **Progress reward** — simple forward-progress signal with lap and off-track terms.
+6. **NumPy DQN baseline** — replay buffer, epsilon-greedy exploration, target network, Q-learning loss.
+7. **Training and live evaluation scripts** — train, checkpoint, plot, and watch the agent.
+8. **Renderer** — Matplotlib top-down viewer in headless or live mode.
+9. **Tests** — unit coverage for environment, network, agent, scripts, renderer, and logging.
+
+### Experimental
+
+- Circular and figure-8 tracks
+- Obstacles and lidar/raycast variants
+- Double DQN, Dueling DQN, PER, NoisyNet, N-step returns
+- Grid search and GIF comparison scripts
 
 ### 🗺️ Major upgrade roadmap
 
