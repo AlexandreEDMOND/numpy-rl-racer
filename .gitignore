@@ -4,3 +4,12 @@ __pycache__/
 .ruff_cache/
 .DS_Store
 *.pyc
+
+# Local training/evaluation artifacts.
+/logs/**
+/models/v0/
+/models/local/
+/models/runs/
+/images/eval/
+/images/tmp/
+/images/benchmark/

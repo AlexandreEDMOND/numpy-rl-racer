@@ -3,11 +3,12 @@
 A small from-scratch reinforcement learning racing project built with **NumPy only**.
 No PyTorch, TensorFlow, JAX, Gymnasium, or external RL library.
 
-The stable baseline is intentionally simple: a DQN agent learns to drive a small
-2D car around a circular track using local, car-relative observations and a
-progress-based reward. Extra experiments such as rectangular/figure-8 tracks,
-obstacles, PER, Dueling DQN, NoisyNet, N-step returns, and GIF comparison tools
-still exist in the repo, but they are not the default path.
+The stable v0 baseline is intentionally simple: a DQN agent learns to drive a
+small 2D car around a circular track using local, car-relative observations, a
+progress-based reward, and the no-idle action space. Extra experiments such as
+rectangular/figure-8 tracks, obstacles, PER, Dueling DQN, NoisyNet, N-step
+returns, and GIF comparison tools still exist in the repo, but they are not the
+default path.
 
 ## Features
 
@@ -86,8 +87,14 @@ uv run ruff check .
 # Train the v0 DQN baseline
 uv run python scripts/train.py --episodes 500 --max-steps 300 --eval-freq 50 --eval-episodes 3 --save-dir models/v0 --log-dir logs/v0 --seed 0
 
+# Reproduce the v0 circular no-idle benchmark, including a greedy smoke eval
+uv run python scripts/benchmark_v0.py
+
 # Watch a trained agent live
 uv run python scripts/evaluate.py --model-path models/v0/best_model.npz --live --episodes 1 --max-steps 400 --fps 30
+
+# Evaluate headlessly and save final frames
+uv run python scripts/evaluate.py --model-path models/v0/best_model.npz --headless --save-dir images/eval
 
 # Experimental: train with rectangular track, obstacles, and Dueling DQN
 uv run python scripts/train.py \
@@ -98,9 +105,6 @@ uv run python scripts/train.py \
 
 # Train with a JSON config file
 uv run python scripts/train.py --config my_config.json
-
-# Evaluate headlessly and save final frames
-uv run python scripts/evaluate.py --model-path models/v0/best_model.npz --headless
 
 # Grid search over hyperparameters
 uv run python scripts/grid_search.py
@@ -124,6 +128,24 @@ After training, the greedy policy was evaluated for 3 episodes. Below are the fi
 The side-by-side animation below contrasts the **trained DQN policy** (left) with a **random policy** (right) on the same track starting from the same position. The trained agent consistently stays on track and completes laps, while the random agent drives off the track within a few steps.
 
 ![Trained vs Random policy comparison](images/trained_vs_random.gif)
+
+## Baseline vs Experiments
+
+Use `scripts/benchmark_v0.py` as the reproducible v0.1 baseline check. It runs
+the circular track, local observations, progress reward, no reward lines,
+deterministic start, no-idle actions, seed `0`, periodic greedy evaluation, and
+prints the best eval reward plus a greedy smoke-test distance.
+
+The rectangular track, figure-8 track, obstacles, reward lines, global-state
+observations, and advanced DQN variants are experimental. They are useful for
+exploration, but they are not the stability target for v0.1.
+
+Known limits:
+- Circular v0 is the stable baseline.
+- Rectangular is still harder because the corners expose weaker exploration and
+  control behavior.
+- Generated local outputs under `logs/`, `models/v0/`, and temporary evaluation
+  image directories are ignored by git.
 
 ## Project constraints
 

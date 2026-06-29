@@ -213,6 +213,9 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
 
+    if args.seed is not None:
+        np.random.seed(args.seed)
+
     os.makedirs(args.save_dir, exist_ok=True)
 
     resolved = {k: v for k, v in vars(args).items() if k != "config"}
