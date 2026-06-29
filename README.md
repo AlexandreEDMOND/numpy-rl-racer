@@ -10,6 +10,8 @@ rectangular/figure-8 tracks, obstacles, PER, Dueling DQN, NoisyNet, N-step
 returns, and GIF comparison tools still exist in the repo, but they are not the
 default path.
 
+Current baseline release: `v0.1.0`.
+
 ## Features
 
 **Stable v0 baseline:**
@@ -41,7 +43,7 @@ default path.
 
 The agent controls a **red car** (shown as a dot with a heading arrow) that drives on a 2D racetrack. The car uses a kinematic bicycle model — steering rotates its heading, and acceleration changes its speed. The goal is to **complete as many laps as possible** without driving off the road.
 
-Three track types are available, each with a **start/finish line** (green star marker) where the car begins and lap completion is detected. Blue **reward lines** (checkpoint gates) are placed around the track — crossing one gives a bonus reward, encouraging the agent to complete the full loop:
+Three track types are available, each with a **start/finish line** (green star marker) where the car begins and lap completion is detected. Optional blue **reward lines** (checkpoint gates) can be enabled for experiments; the v0.1 baseline keeps them disabled and relies on progress reward:
 
 ![Environment overview](images/environment_overview.png)
 
@@ -53,7 +55,9 @@ Three track types are available, each with a **start/finish line** (green star m
 | `dist_to_edge` | Normalized distance to nearest road edge |
 | `left_ray`, `front_left_ray`, `front_ray`, `front_right_ray`, `right_ray` | Local ray distances to track boundaries or obstacles |
 
-**What the agent can do** (5 discrete actions):
+**What the agent can do**:
+
+The full environment exposes 5 discrete actions:
 | Action | Steering | Acceleration |
 |---|---|---|
 | Steer left + accelerate | -1.5 | +1.0 |
@@ -61,6 +65,9 @@ Three track types are available, each with a **start/finish line** (green star m
 | Go straight + accelerate | 0.0 | +1.0 |
 | Coast | 0.0 | 0.0 |
 | Brake | 0.0 | -0.5 |
+
+The v0.1 baseline uses the no-idle subset: steer left + accelerate, steer right
++ accelerate, and go straight + accelerate.
 
 **Default v0 reward:**
 - Positive reward for forward progress along the centerline
@@ -134,7 +141,8 @@ The side-by-side animation below contrasts the **trained DQN policy** (left) wit
 Use `scripts/benchmark_v0.py` as the reproducible v0.1 baseline check. It runs
 the circular track, local observations, progress reward, no reward lines,
 deterministic start, no-idle actions, seed `0`, periodic greedy evaluation, and
-prints the best eval reward plus a greedy smoke-test distance.
+prints the best eval reward plus a greedy smoke-test distance. By default it
+writes local outputs to ignored `models/v0/` and `logs/v0/` directories.
 
 The rectangular track, figure-8 track, obstacles, reward lines, global-state
 observations, and advanced DQN variants are experimental. They are useful for
