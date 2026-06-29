@@ -911,6 +911,28 @@ def test_compare_policies_generates_gif(tmp_path):
         sys.path[:] = orig_path
 
 
+def test_compare_policies_live_mode_skips_gif(tmp_path):
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        import compare_policies
+        model_path = str(tmp_path / "test_model.npz")
+        _make_agent_checkpoint(model_path, state_dim=6)
+        with patch.object(compare_policies, "_render_live_comparison") as live, \
+             patch.object(compare_policies, "_save_comparison_gif") as save_gif:
+            compare_policies.main([
+                "--model-path", model_path,
+                "--max-steps", "3",
+                "--save-dir", str(tmp_path),
+                "--live",
+            ])
+        live.assert_called_once()
+        save_gif.assert_not_called()
+    finally:
+        sys.path[:] = orig_path
+
+
 def test_grid_search_seed(tmp_path):
     gs_main = _make_grid_search()
     csv_a = str(tmp_path / "a.csv")

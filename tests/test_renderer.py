@@ -262,3 +262,23 @@ def test_reward_lines_empty_when_not_provided():
     renderer = MatplotlibRenderer(track, headless=True)
     assert len(renderer._reward_line_endpoints) == 0
     renderer.close()
+
+
+def test_renderer_title_includes_rollout_stats():
+    track = RectangularTrack()
+    renderer = MatplotlibRenderer(track, headless=True)
+    state = CarState(x=0.0, y=0.0, heading=0.0, velocity=0.0)
+    renderer.render(
+        state,
+        step=3,
+        reward=0.6,
+        total_reward=4.2,
+        lap_count=1,
+        reward_lines_crossed=2,
+    )
+    title = renderer.ax.get_title()
+    assert "step_reward=0.60" in title
+    assert "total=4.20" in title
+    assert "laps=1" in title
+    assert "lines=2" in title
+    renderer.close()

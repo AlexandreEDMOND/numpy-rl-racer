@@ -53,7 +53,11 @@ def main(argv=None):
     agent.load(args.model_path)
     agent.epsilon = 0.0
 
-    renderer = MatplotlibRenderer(env.track, headless=args.headless)
+    renderer = MatplotlibRenderer(
+        env.track,
+        headless=args.headless,
+        reward_line_progress=getattr(env, "_reward_line_progress", None),
+    )
 
     total_rewards = []
     total_steps = []
@@ -65,11 +69,20 @@ def main(argv=None):
         if args.gif:
             renderer.start_recording()
 
+        reward = 0.0
+        info = {"lap_count": env.lap_count, "reward_lines_crossed": 0}
         for step in range(args.max_steps):
             action_idx = agent.act(state, training=False)
-            next_state, reward, done, _ = env.step(ACTIONS[action_idx])
-            renderer.render(env.state, step=step, reward=reward)
+            next_state, reward, done, info = env.step(ACTIONS[action_idx])
             ep_reward += reward
+            renderer.render(
+                env.state,
+                step=step,
+                reward=reward,
+                total_reward=ep_reward,
+                lap_count=info.get("lap_count"),
+                reward_lines_crossed=info.get("reward_lines_crossed"),
+            )
             state = next_state
             if done:
                 break
@@ -78,7 +91,14 @@ def main(argv=None):
         total_steps.append(step + 1)
         print(f"ep={ep:2d}  reward={ep_reward:7.2f}  steps={step + 1:3d}")
 
-        renderer.render(env.state, step=step, reward=ep_reward)
+        renderer.render(
+            env.state,
+            step=step,
+            reward=reward,
+            total_reward=ep_reward,
+            lap_count=info.get("lap_count"),
+            reward_lines_crossed=info.get("reward_lines_crossed"),
+        )
         fig_path = os.path.join(args.save_dir, f"eval_ep{ep}_final.png")
         renderer.fig.savefig(fig_path, dpi=150)
         print(f"  Saved {fig_path}")

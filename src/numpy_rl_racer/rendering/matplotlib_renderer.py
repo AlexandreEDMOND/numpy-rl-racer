@@ -6,10 +6,17 @@ from numpy_rl_racer.env.racing_env import Figure8Track
 
 
 class MatplotlibRenderer:
-    def __init__(self, track, figsize=(8, 6), headless=False, reward_line_progress=None):
+    def __init__(self, track, figsize=(8, 6), headless=False, reward_line_progress=None, ax=None):
         self.track = track
         self._headless = headless
-        if headless:
+        self._owns_figure = ax is None
+        if ax is not None:
+            if not headless:
+                import matplotlib.pyplot as plt
+                self._plt = plt
+            self.fig = ax.figure
+            self.ax = ax
+        elif headless:
             from matplotlib.figure import Figure
             from matplotlib.backends.backend_agg import FigureCanvasAgg
             self.fig = Figure(figsize=figsize)
@@ -226,7 +233,16 @@ class MatplotlibRenderer:
             loop=0,
         )
 
-    def render(self, state, step=None, reward=None, obstacles=None):
+    def render(
+        self,
+        state,
+        step=None,
+        reward=None,
+        obstacles=None,
+        total_reward=None,
+        lap_count=None,
+        reward_lines_crossed=None,
+    ):
         self.ax.clear()
         self._draw_background()
 
@@ -255,7 +271,13 @@ class MatplotlibRenderer:
         if step is not None:
             title += f"   step={step}"
         if reward is not None:
-            title += f"   reward={reward:.2f}"
+            title += f"   step_reward={reward:.2f}"
+        if total_reward is not None:
+            title += f"   total={total_reward:.2f}"
+        if lap_count is not None:
+            title += f"   laps={lap_count}"
+        if reward_lines_crossed is not None:
+            title += f"   lines={reward_lines_crossed}"
         self.ax.set_title(title)
 
         self.fig.canvas.draw_idle()
@@ -272,8 +294,9 @@ class MatplotlibRenderer:
             self._plt.show(block=True)
 
     def close(self):
-        if not self._headless:
+        if not self._headless and self._owns_figure:
             self._plt.close(self.fig)
-        self.fig.clear()
+        if self._owns_figure:
+            self.fig.clear()
         self._recording = False
         self._recording_frames = []
