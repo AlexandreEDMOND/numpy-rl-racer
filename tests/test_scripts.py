@@ -121,6 +121,15 @@ def test_evaluate_gif_flag(tmp_path):
     assert gifs[0].stat().st_size > 0
 
 
+def test_evaluate_mp4_flag_calls_video_export(tmp_path):
+    with patch(
+        "numpy_rl_racer.rendering.matplotlib_renderer.MatplotlibRenderer.save_video"
+    ) as save_video:
+        _run_evaluate_main(tmp_path, ["--mp4", "--record-fps", "24"])
+    save_video.assert_called_once()
+    assert save_video.call_args.kwargs["fps"] == 24
+
+
 def test_evaluate_with_dueling_model(tmp_path):
     scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
     orig_path = sys.path.copy()

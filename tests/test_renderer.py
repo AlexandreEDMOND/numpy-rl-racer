@@ -89,6 +89,27 @@ def test_save_animation_without_recording_raises_error(tmp_path):
     renderer.close()
 
 
+def test_save_video_without_recording_raises_error(tmp_path):
+    renderer = MatplotlibRenderer(_track(), headless=True)
+    with pytest.raises(RuntimeError, match="No frames recorded"):
+        renderer.save_video(str(tmp_path / "empty.mp4"))
+    renderer.close()
+
+
+def test_save_video_without_ffmpeg_raises_error(tmp_path):
+    from unittest.mock import patch
+
+    track = _track()
+    x, y, heading = track.start_position
+    renderer = MatplotlibRenderer(track, headless=True)
+    renderer.start_recording()
+    renderer.render(CarState(x=x, y=y, heading=heading, velocity=2.0))
+    with patch("numpy_rl_racer.rendering.matplotlib_renderer.shutil.which", return_value=None):
+        with pytest.raises(RuntimeError, match="requires ffmpeg"):
+            renderer.save_video(str(tmp_path / "test.mp4"))
+    renderer.close()
+
+
 def test_save_animation_after_stop_recording_raises_error(tmp_path):
     track = _track()
     x, y, heading = track.start_position

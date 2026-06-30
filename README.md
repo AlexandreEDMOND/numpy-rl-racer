@@ -18,7 +18,7 @@ The project intentionally keeps the learning stack simple:
 - progress-based reward with lap bonus and off-track penalty;
 - plain DQN with replay buffer and target network;
 - NumPy MLP, optimizers, schedulers, and checkpointing;
-- Matplotlib rendering for still frames, GIFs, and live evaluation.
+- Matplotlib rendering for still frames, GIFs, MP4 videos, and live evaluation.
 
 ## Visual Overview
 
@@ -93,7 +93,7 @@ uv run python scripts/train.py \
   --seed 0 \
   --track-seed 0
 
-# Watch a trained agent live
+# Watch a trained agent live in a Matplotlib window
 uv run python scripts/evaluate.py \
   --model-path models/procedural/best_model.npz \
   --live \
@@ -101,7 +101,15 @@ uv run python scripts/evaluate.py \
   --max-steps 400 \
   --fps 30
 
-# Evaluate headlessly and save frames/GIFs
+# Evaluate headlessly and save an MP4 video
+uv run python scripts/evaluate.py \
+  --model-path models/procedural/best_model.npz \
+  --headless \
+  --mp4 \
+  --record-fps 30 \
+  --save-dir images/eval
+
+# GIF export is still available when a lightweight animation is enough
 uv run python scripts/evaluate.py \
   --model-path models/procedural/best_model.npz \
   --headless \
@@ -143,10 +151,10 @@ Forbidden ML/RL dependencies:
 Near term:
 - Train over a pool of generated tracks instead of a single seed.
 - Add evaluation on held-out track seeds.
-- Record checkpoint-evolution GIFs to show the policy improving over training.
+- Record checkpoint-evolution videos to show the policy improving over training.
 - Add summary plots for progress, off-track rate, and generalization.
 
 Medium term:
 - Improve ray sensor configuration.
 - Add model cards for trained procedural-track checkpoints.
-- Build a stronger visual README with training evolution and generalization GIFs.
+- Build a stronger visual README with training evolution and generalization videos.

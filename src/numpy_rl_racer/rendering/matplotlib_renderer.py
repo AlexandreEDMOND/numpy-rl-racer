@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.patches as mpatches
 from matplotlib.path import Path
+import shutil
+import subprocess
 
 
 class MatplotlibRenderer:
@@ -121,6 +123,39 @@ class MatplotlibRenderer:
             duration=duration,
             loop=0,
         )
+
+    def save_video(self, filepath, fps=30):
+        if not self._recording_frames:
+            raise RuntimeError(
+                "No frames recorded. Call start_recording() and render() before save_video()."
+            )
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            raise RuntimeError("MP4 export requires ffmpeg to be installed and available on PATH.")
+
+        first = self._recording_frames[0]
+        height, width = first.shape[:2]
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-f", "rawvideo",
+            "-vcodec", "rawvideo",
+            "-pix_fmt", "rgb24",
+            "-s", f"{width}x{height}",
+            "-r", str(fps),
+            "-i", "-",
+            "-an",
+            "-vcodec", "libx264",
+            "-pix_fmt", "yuv420p",
+            filepath,
+        ]
+        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert proc.stdin is not None
+        for frame in self._recording_frames:
+            proc.stdin.write(frame.astype(np.uint8).tobytes())
+        _, stderr = proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed while writing {filepath}: {stderr.decode().strip()}")
 
     def render(
         self,

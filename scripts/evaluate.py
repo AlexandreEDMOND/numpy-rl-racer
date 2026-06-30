@@ -107,6 +107,10 @@ def main(argv=None):
     parser.add_argument("--fps", type=int, default=20, help="Playback FPS in live mode")
     parser.add_argument("--gif", "--save-gif", action="store_true",
                         help="Record and save GIF animation of each evaluation episode")
+    parser.add_argument("--mp4", "--save-mp4", action="store_true",
+                        help="Record and save MP4 video of each evaluation episode")
+    parser.add_argument("--record-fps", type=int, default=30,
+                        help="FPS for saved GIF/MP4 recordings")
     args = parser.parse_args(argv)
 
     os.makedirs(args.save_dir, exist_ok=True)
@@ -162,7 +166,7 @@ def main(argv=None):
         state = env.reset(seed=args.seed + ep)
         ep_reward = 0.0
 
-        if args.gif:
+        if args.gif or args.mp4:
             renderer.start_recording()
 
         reward = 0.0
@@ -205,8 +209,15 @@ def main(argv=None):
 
         if args.gif:
             gif_path = os.path.join(args.save_dir, f"eval_ep{ep}.gif")
-            renderer.save_animation(gif_path, fps=10)
+            renderer.save_animation(gif_path, fps=args.record_fps)
             print(f"  Saved {gif_path}")
+
+        if args.mp4:
+            mp4_path = os.path.join(args.save_dir, f"eval_ep{ep}.mp4")
+            renderer.save_video(mp4_path, fps=args.record_fps)
+            print(f"  Saved {mp4_path}")
+
+        if args.gif or args.mp4:
             renderer.stop_recording()
 
     if args.live:
