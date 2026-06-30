@@ -4,9 +4,11 @@ __pycache__/
 .ruff_cache/
 .DS_Store
 *.pyc
+*.egg-info/
 
 # Local training/evaluation artifacts.
 /logs/**
+/models/procedural/
 /models/v0/
 /models/local/
 /models/runs/
