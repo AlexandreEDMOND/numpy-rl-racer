@@ -88,14 +88,14 @@ uv run python scripts/train.py \
   --max-steps 300 \
   --eval-freq 50 \
   --eval-episodes 3 \
-  --save-dir models/procedural \
-  --log-dir logs/procedural \
+  --save-dir models/local \
+  --log-dir logs/local \
   --seed 0 \
   --track-seed 0
 
 # Watch a trained agent live in a Matplotlib window
 uv run python scripts/evaluate.py \
-  --model-path models/procedural/best_model.npz \
+  --model-path models/best_model.npz \
   --live \
   --episodes 1 \
   --max-steps 400 \
@@ -103,22 +103,23 @@ uv run python scripts/evaluate.py \
 
 # Evaluate headlessly and save an MP4 video
 uv run python scripts/evaluate.py \
-  --model-path models/procedural/best_model.npz \
+  --model-path models/best_model.npz \
   --headless \
   --mp4 \
   --record-fps 30 \
-  --save-dir images/eval
+  --save-dir images/tmp
 
 # GIF export is still available when a lightweight animation is enough
 uv run python scripts/evaluate.py \
-  --model-path models/procedural/best_model.npz \
+  --model-path models/best_model.npz \
   --headless \
   --gif \
-  --save-dir images/eval
+  --save-dir images/tmp
 
 # Compare a trained policy against a random policy on the same generated track
 uv run python scripts/compare_policies.py \
-  --model-path models/procedural/best_model.npz \
+  --model-path models/best_model.npz \
+  --save-dir images/tmp \
   --track-seed 0
 ```
 

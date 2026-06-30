@@ -26,6 +26,29 @@ def test_default_track_is_procedural():
     assert isinstance(env.track, ProceduralTrack)
 
 
+def _make_preview_tracks():
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from preview_tracks import main
+        return main
+    finally:
+        sys.path[:] = orig_path
+
+
+def test_preview_tracks_generates_nonblank_gallery(tmp_path):
+    preview_main = _make_preview_tracks()
+    output = tmp_path / "gallery.png"
+    preview_main(["--seeds", "0", "1", "--cols", "2", "--output", str(output)])
+
+    assert output.exists()
+    from PIL import Image
+    with Image.open(output) as img:
+        pixels = np.asarray(img.convert("RGB"))
+    assert pixels.std() > 0
+
+
 def test_train_procedural_runs(tmp_path):
     main = _make_main()
     with patch.object(DQNAgent, "act", return_value=0), \

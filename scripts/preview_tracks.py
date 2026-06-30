@@ -41,7 +41,7 @@ def main(argv=None):
 
     rows = (len(args.seeds) + args.cols - 1) // args.cols
     fig, axes = plt.subplots(rows, args.cols, figsize=(4.2 * args.cols, 4.0 * rows))
-    axes = getattr(axes, "flat", [axes])
+    axes = list(getattr(axes, "flat", [axes]))
 
     for ax in axes:
         ax.axis("off")

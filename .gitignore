@@ -5,6 +5,8 @@ __pycache__/
 .DS_Store
 *.pyc
 *.egg-info/
+grid_search_results.csv
+grid_search_results.png
 
 # Local training/evaluation artifacts.
 /logs/**
