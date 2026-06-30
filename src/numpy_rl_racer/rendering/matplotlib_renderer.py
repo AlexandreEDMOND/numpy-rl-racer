@@ -1,8 +1,6 @@
 import numpy as np
-from matplotlib.path import Path
 import matplotlib.patches as mpatches
-
-from numpy_rl_racer.env.racing_env import Figure8Track
+from matplotlib.path import Path
 
 
 class MatplotlibRenderer:
@@ -17,8 +15,8 @@ class MatplotlibRenderer:
             self.fig = ax.figure
             self.ax = ax
         elif headless:
-            from matplotlib.figure import Figure
             from matplotlib.backends.backend_agg import FigureCanvasAgg
+            from matplotlib.figure import Figure
             self.fig = Figure(figsize=figsize)
             FigureCanvasAgg(self.fig)
             self.ax = self.fig.add_subplot(111)
@@ -37,159 +35,50 @@ class MatplotlibRenderer:
         self._recording_frames = []
 
     def _compute_boundary_lines(self):
-        if isinstance(self.track, Figure8Track):
-            self._compute_figure8_boundaries()
-        elif hasattr(self.track, 'radius'):
-            R = float(self.track.radius)
-            tw2 = float(self.track.track_width) / 2.0
-            theta = np.linspace(0, 2 * np.pi, 200)
-            self._outer_boundary = np.column_stack([
-                (R + tw2) * np.cos(theta),
-                (R + tw2) * np.sin(theta),
-            ])
-            self._inner_boundary = np.column_stack([
-                (R - tw2) * np.cos(theta),
-                (R - tw2) * np.sin(theta),
-            ])
-        else:
-            hw = float(self.track.half_w)
-            hh = float(self.track.half_h)
-            tw2 = float(self.track.track_width) / 2.0
-            self._outer_boundary = np.array([
-                [-hw - tw2, -hh - tw2],
-                [hw + tw2, -hh - tw2],
-                [hw + tw2, hh + tw2],
-                [-hw - tw2, hh + tw2],
-                [-hw - tw2, -hh - tw2],
-            ])
-            self._inner_boundary = np.array([
-                [-hw + tw2, -hh + tw2],
-                [hw - tw2, -hh + tw2],
-                [hw - tw2, hh - tw2],
-                [-hw + tw2, hh - tw2],
-                [-hw + tw2, -hh + tw2],
-            ])
-
-    def _compute_figure8_boundaries(self):
-        R = float(self.track.radius)
-        tw2 = float(self.track.track_width) / 2.0
-        n = 400
-        theta = np.linspace(0, 2 * np.pi, n, endpoint=True)
-        cx = R * np.cos(theta)
-        cy = R * np.sin(theta) * np.cos(theta)
-        norm = np.sqrt(np.sin(theta) ** 2 + np.cos(2.0 * theta) ** 2)
-        nx = -np.cos(2.0 * theta) / norm
-        ny = -np.sin(theta) / norm
-        self._outer_boundary = np.column_stack([cx + tw2 * nx, cy + tw2 * ny])
-        self._inner_boundary = np.column_stack([cx - tw2 * nx, cy - tw2 * ny])
+        self._outer_boundary = np.asarray(self.track.outer_boundary, dtype=np.float64)
+        self._inner_boundary = np.asarray(self.track.inner_boundary, dtype=np.float64)
+        self._centerline = np.vstack([
+            self.track.centerline_points,
+            self.track.centerline_points[:1],
+        ])
 
     def _draw_boundary_lines(self):
         self.ax.plot(self._outer_boundary[:, 0], self._outer_boundary[:, 1],
-                      color="#666666", linewidth=0.8, zorder=2)
+                     color="#666666", linewidth=0.8, zorder=2)
         self.ax.plot(self._inner_boundary[:, 0], self._inner_boundary[:, 1],
-                      color="#666666", linewidth=0.8, zorder=2)
+                     color="#666666", linewidth=0.8, zorder=2)
 
     def _draw_background(self):
-        if isinstance(self.track, Figure8Track):
-            self._draw_figure8_background()
-        elif hasattr(self.track, 'radius'):
-            self._draw_circular_background()
-        else:
-            self._draw_rectangular_background()
+        self._draw_track_background()
         self._draw_boundary_lines()
         self._draw_reward_lines()
 
-    def _draw_rectangular_background(self):
-        hw = float(self.track.half_w)
-        hh = float(self.track.half_h)
-        tw = float(self.track.track_width)
-        tw2 = tw / 2.0
-
-        outer = [(-hw - tw2, -hh - tw2), (hw + tw2, -hh - tw2), (hw + tw2, hh + tw2), (-hw - tw2, hh + tw2)]
-        inner = [(-hw + tw2, -hh + tw2), (hw - tw2, -hh + tw2), (hw - tw2, hh - tw2), (-hw + tw2, hh - tw2)]
-
-        path = Path(
-            outer + inner[::-1] + outer[:1],
-            [
-                Path.MOVETO, Path.LINETO, Path.LINETO, Path.LINETO,
-                Path.MOVETO, Path.LINETO, Path.LINETO, Path.LINETO,
-                Path.CLOSEPOLY,
-            ],
+    def _draw_track_background(self):
+        outer = self._outer_boundary
+        inner = self._inner_boundary
+        vertices = np.vstack([outer, inner[::-1], outer[:1]])
+        codes = (
+            [Path.MOVETO] + [Path.LINETO] * (len(outer) - 1)
+            + [Path.MOVETO] + [Path.LINETO] * (len(inner) - 1)
+            + [Path.CLOSEPOLY]
         )
-        self.ax.add_patch(mpatches.PathPatch(path, facecolor="#dddddd", edgecolor="#888888", linewidth=1))
-
-        edges = [
-            (-hw, -hh, hw, -hh),
-            (hw, -hh, hw, hh),
-            (hw, hh, -hw, hh),
-            (-hw, hh, -hw, -hh),
-        ]
-        for x1, y1, x2, y2 in edges:
-            self.ax.plot([x1, x2], [y1, y2], "--", color="#aaaaaa", linewidth=0.5, zorder=1)
-
-        margin = tw
-        self.ax.set_xlim(-hw - margin, hw + margin)
-        self.ax.set_ylim(-hh - margin, hh + margin)
-        self.ax.grid(True, alpha=0.3)
-        self.ax.set_title("numpy-rl-racer")
-
-    def _draw_circular_background(self):
-        R = float(self.track.radius)
-        tw = float(self.track.track_width)
-        tw2 = tw / 2.0
-
-        self.ax.add_patch(
-            mpatches.Circle((0, 0), R + tw2, facecolor="#dddddd", edgecolor="#888888", linewidth=1)
-        )
-        self.ax.add_patch(
-            mpatches.Circle((0, 0), R - tw2, facecolor=self.fig.get_facecolor(), edgecolor="#888888", linewidth=1)
-        )
-        self.ax.add_patch(
-            mpatches.Circle((0, 0), R, fill=False, linestyle="--", color="#aaaaaa", linewidth=0.5)
-        )
-
-        margin = tw
-        self.ax.set_xlim(-R - margin, R + margin)
-        self.ax.set_ylim(-R - margin, R + margin)
-        self.ax.grid(True, alpha=0.3)
-        self.ax.set_title("numpy-rl-racer")
-
-    def _draw_figure8_background(self):
-        R = float(self.track.radius)
-        tw = float(self.track.track_width)
-        tw2 = tw / 2.0
-        n = 400
-
-        theta = np.linspace(0, 2 * np.pi, n, endpoint=True)
-        cx = R * np.cos(theta)
-        cy = R * np.sin(theta) * np.cos(theta)
-        norm = np.sqrt(np.sin(theta) ** 2 + np.cos(2.0 * theta) ** 2)
-        nx = -np.cos(2.0 * theta) / norm
-        ny = -np.sin(theta) / norm
-
-        outer = np.column_stack([cx + tw2 * nx, cy + tw2 * ny])
-        inner = np.column_stack([cx - tw2 * nx, cy - tw2 * ny])
-
-        path = Path(
-            np.vstack([outer, inner[::-1], outer[:1]]),
-            [Path.MOVETO] + [Path.LINETO] * (n - 1)
-            + [Path.MOVETO] + [Path.LINETO] * (n - 1)
-            + [Path.CLOSEPOLY],
-        )
+        path = Path(vertices, codes)
         self.ax.add_patch(
             mpatches.PathPatch(path, facecolor="#dddddd", edgecolor="#888888", linewidth=1)
         )
-
-        cx_center = R * np.cos(np.linspace(0, 2 * np.pi, 200))
-        cy_center = R * np.sin(np.linspace(0, 2 * np.pi, 200)) * np.cos(np.linspace(0, 2 * np.pi, 200))
-        self.ax.plot(cx_center, cy_center, "--", color="#aaaaaa", linewidth=0.5, zorder=1)
-
+        self.ax.plot(
+            self._centerline[:, 0],
+            self._centerline[:, 1],
+            "--",
+            color="#aaaaaa",
+            linewidth=0.5,
+            zorder=1,
+        )
         gx, gy = self.track.goal_position
-        self.ax.plot(gx, gy, "o", color="#1a7c1a", markersize=8, zorder=1)
+        self.ax.plot(gx, gy, "*", color="#1a7c1a", markersize=10, zorder=3)
 
-        margin = tw
-        self.ax.set_xlim(-R - margin, R + margin)
-        self.ax.set_ylim(-R - margin, R + margin)
+        self.ax.set_xlim(float(self.track.x_min), float(self.track.x_max))
+        self.ax.set_ylim(float(self.track.y_min), float(self.track.y_max))
         self.ax.grid(True, alpha=0.3)
         self.ax.set_title("numpy-rl-racer")
 

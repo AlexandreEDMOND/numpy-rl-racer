@@ -1,18 +1,13 @@
-"""Generate an annotated environment overview image for the README."""
+"""Generate an annotated procedural environment overview image for the README."""
 
-import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
+import numpy as np
 
-from numpy_rl_racer.env.racing_env import (
-    RectangularTrack,
-    CircularTrack,
-    Figure8Track,
-    reward_line_endpoints,
-)
+from numpy_rl_racer.env.racing_env import ProceduralTrack, reward_line_endpoints
 from numpy_rl_racer.rendering.matplotlib_renderer import MatplotlibRenderer
 
 
@@ -33,7 +28,8 @@ def _draw_background(ax, track):
     renderer._draw_background()
 
 
-def _place_car(ax, x, y, heading):
+def _place_car(ax, track, progress):
+    x, y, heading = track.get_centerline_point(progress)
     ax.plot(x, y, "o", color="red", markersize=10, zorder=7)
     dx = np.cos(heading) * 0.6
     dy = np.sin(heading) * 0.6
@@ -41,43 +37,21 @@ def _place_car(ax, x, y, heading):
              fc="red", ec="red", zorder=8)
 
 
-def _mark_goal(ax, x, y):
-    ax.plot(x, y, "*", color="#1a7c1a", markersize=14, zorder=6,
+def draw_track(ax, seed, progress):
+    track = ProceduralTrack(seed=seed, radius=6.0, track_width=2.0)
+    _draw_background(ax, track)
+    _place_car(ax, track, progress)
+    gx, gy = track.goal_position
+    ax.plot(gx, gy, "*", color="#1a7c1a", markersize=14, zorder=6,
             markeredgecolor="#0d4f0d", markeredgewidth=0.5)
-
-
-def draw_rectangular(ax):
-    track = RectangularTrack(width=10.0, height=8.0, track_width=2.0)
-    _draw_background(ax, track)
-    _place_car(ax, 2.5, -2.0, -0.3)
-    _mark_goal(ax, *track.goal_position)
-    ax.set_title("Rectangular Track", fontsize=12, fontweight="bold")
-
-
-def draw_circular(ax):
-    track = CircularTrack(radius=6.0, track_width=2.0)
-    _draw_background(ax, track)
-    _place_car(ax, 3.0, -3.5, 0.8)
-    _mark_goal(ax, *track.goal_position)
-    ax.set_title("Circular Track", fontsize=12, fontweight="bold")
-
-
-def draw_figure8(ax):
-    track = Figure8Track(radius=6.0, track_width=2.0)
-    _draw_background(ax, track)
-    _place_car(ax, 0.0, 3.0, -0.5)
-    _mark_goal(ax, *track.goal_position)
-    ax.set_title("Figure-8 Track", fontsize=12, fontweight="bold")
+    ax.set_title(f"Procedural seed {seed}", fontsize=12, fontweight="bold")
 
 
 def main():
     fig, axes = plt.subplots(1, 3, figsize=(16, 5.5))
 
-    draw_rectangular(axes[0])
-    draw_circular(axes[1])
-    draw_figure8(axes[2])
-
-    for ax in axes:
+    for ax, seed, progress in zip(axes, [0, 7, 21], [0.12, 0.42, 0.72]):
+        draw_track(ax, seed, progress)
         ax.set_xlabel("X position", fontsize=10)
         ax.set_ylabel("Y position", fontsize=10)
 
@@ -87,20 +61,20 @@ def main():
         Line2D([0], [0], color="red", linewidth=2,
                label="Car heading (direction)"),
         Line2D([0], [0], marker="*", color="w", markerfacecolor="#1a7c1a",
-               markersize=12, label="Start / Finish line"),
+               markersize=12, label="Start / finish"),
         Patch(facecolor="#dddddd", edgecolor="#888888", label="Road surface"),
         Line2D([0], [0], color="#666666", linewidth=0.8, label="Road boundaries"),
         Line2D([0], [0], linestyle="--", color="#aaaaaa", linewidth=0.5,
                label="Centerline"),
         Line2D([0], [0], color="#2e86c1", linewidth=1.5,
-               label="Reward line (checkpoint)"),
+               label="Reward line"),
     ]
 
     fig.legend(handles=legend_elements, loc="lower center",
                ncol=7, fontsize=9, frameon=True,
                bbox_to_anchor=(0.5, -0.08))
 
-    fig.suptitle("NumPy RL Racer — Environment Overview",
+    fig.suptitle("NumPy RL Racer - Procedural Track Overview",
                  fontsize=15, fontweight="bold", y=1.02)
 
     plt.tight_layout()

@@ -6,7 +6,7 @@ import time
 import numpy as np
 
 from numpy_rl_racer.agent import DQNAgent, ACTIONS
-from numpy_rl_racer.env import CircularTrack, Figure8Track, Obstacle, RacingEnv, RectangularTrack
+from numpy_rl_racer.env import Obstacle, ProceduralTrack, RacingEnv
 from numpy_rl_racer.rendering import MatplotlibRenderer
 
 
@@ -26,42 +26,37 @@ def _load_config(path):
 def _generate_obstacles(track, num_obstacles, seed=None):
     rng = np.random.RandomState(seed)
     obstacles = []
-    if hasattr(track, 'radius'):
-        radius = float(track.radius)
-        inner_r = radius - track.track_width
-        for _ in range(num_obstacles):
-            angle = rng.uniform(0, 2 * np.pi)
-            dist = rng.uniform(0, inner_r * 0.85)
-            obstacles.append(Obstacle(
-                dist * np.cos(angle),
-                dist * np.sin(angle),
-                rng.uniform(0.3, 0.5),
-            ))
-    else:
-        hw = float(track.half_w)
-        hh = float(track.half_h)
-        inner_hw = hw - track.track_width
-        inner_hh = hh - track.track_width
-        for _ in range(num_obstacles):
-            obstacles.append(Obstacle(
-                rng.uniform(-inner_hw * 0.85, inner_hw * 0.85),
-                rng.uniform(-inner_hh * 0.85, inner_hh * 0.85),
-                rng.uniform(0.3, 0.5),
-            ))
+    for _ in range(num_obstacles):
+        cx, cy, tangent = track.sample_centerline_point(rng=rng)
+        lateral = rng.uniform(-0.25, 0.25) * float(track.track_width)
+        perp_angle = tangent + np.pi / 2.0
+        obstacles.append(Obstacle(
+            cx + lateral * np.cos(perp_angle),
+            cy + lateral * np.sin(perp_angle),
+            rng.uniform(0.3, 0.5),
+        ))
     return obstacles
 
 
-def _make_track(track_name):
-    if track_name == "circular":
-        return CircularTrack(radius=6.0, track_width=2.0)
-    if track_name == "figure8":
-        return Figure8Track(radius=6.0, track_width=2.0)
-    return RectangularTrack(width=10.0, height=8.0, track_width=2.0)
+def _make_track(config):
+    return ProceduralTrack(
+        seed=config.get("track_seed", 0),
+        radius=config.get("track_radius", 6.0),
+        track_width=2.0,
+        num_control_points=config.get("track_points", 12),
+        radial_noise=config.get("track_variation", 0.28),
+        smoothing_steps=config.get("track_smoothing", 3),
+    )
 
 
 def _make_env(args, config):
-    track_name = args.track if args.track is not None else config.get("track", "rectangular")
-    track = _make_track(track_name)
+    track_name = args.track if args.track is not None else config.get("track", "procedural")
+    if track_name != "procedural":
+        raise ValueError(f"Unsupported track {track_name!r}; only 'procedural' is available.")
+    config = dict(config)
+    if args.track_seed is not None:
+        config["track_seed"] = args.track_seed
+    track = _make_track(config)
     num_obstacles = int(config.get("num_obstacles", 0))
     obstacles = None
     if num_obstacles > 0:
@@ -102,8 +97,10 @@ def main(argv=None):
     parser.add_argument("--max-steps", type=int, default=200, help="Max steps per episode")
     parser.add_argument("--save-dir", default="images", help="Directory to save rendered images")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for evaluation")
-    parser.add_argument("--track", choices=["rectangular", "circular", "figure8"], default=None,
+    parser.add_argument("--track", choices=["procedural"], default=None,
                         help="Override track type from config")
+    parser.add_argument("--track-seed", type=int, default=None,
+                        help="Override procedural track seed from config")
     parser.add_argument("--headless", action="store_true", help="Run in headless mode (no GUI window)")
     parser.add_argument("--live", action="store_true",
                         help="Show the rollout in a live Matplotlib window")

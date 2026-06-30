@@ -3,74 +3,47 @@ matplotlib.use("Agg")
 
 import pytest
 
-from numpy_rl_racer.rendering import MatplotlibRenderer
-from numpy_rl_racer.env.racing_env import CircularTrack, Figure8Track, RectangularTrack
 from numpy_rl_racer.env.car import CarState
+from numpy_rl_racer.env.racing_env import ProceduralTrack
+from numpy_rl_racer.rendering import MatplotlibRenderer
+
+
+def _track():
+    return ProceduralTrack(seed=0, radius=6.0, track_width=2.0)
 
 
 def test_renderer_can_be_instantiated():
-    track = RectangularTrack()
-    renderer = MatplotlibRenderer(track)
-    assert renderer is not None
+    renderer = MatplotlibRenderer(_track())
     assert renderer.fig is not None
     assert renderer.ax is not None
     renderer.close()
 
 
 def test_renderer_renders_state():
-    track = RectangularTrack()
+    track = _track()
+    x, y, heading = track.start_position
     renderer = MatplotlibRenderer(track)
-    state = CarState(x=1.0, y=1.0, heading=0.5, velocity=2.0)
-    renderer.render(state, step=0, reward=0.1)
+    renderer.render(CarState(x=x, y=y, heading=heading, velocity=2.0), step=0, reward=0.1)
     renderer.close()
 
 
-def test_renderer_can_be_instantiated_with_circular_track():
-    track = CircularTrack(radius=6.0, track_width=2.0)
-    renderer = MatplotlibRenderer(track)
-    assert renderer is not None
-    assert renderer.fig is not None
-    assert renderer.ax is not None
-    renderer.close()
-
-
-def test_renderer_renders_state_with_circular_track():
-    track = CircularTrack(radius=6.0, track_width=2.0)
-    renderer = MatplotlibRenderer(track)
-    state = CarState(x=0.0, y=-6.0, heading=0.0, velocity=2.0)
-    renderer.render(state, step=0, reward=0.1)
-    renderer.close()
-
-
-def test_headless_circular_renderer_saves_figure(tmp_path):
-    track = CircularTrack(radius=6.0, track_width=2.0)
+def test_headless_renderer_saves_figure(tmp_path):
+    track = _track()
+    x, y, heading = track.start_position
     renderer = MatplotlibRenderer(track, headless=True)
-    state = CarState(x=0.0, y=-6.0, heading=0.0, velocity=2.0)
-    renderer.render(state, step=0, reward=0.1)
-    renderer.render(state, step=1, reward=0.2)
-    save_path = tmp_path / "test_circular_output.png"
+    renderer.render(CarState(x=x, y=y, heading=heading, velocity=2.0), step=0, reward=0.1)
+    save_path = tmp_path / "test_procedural_output.png"
     renderer.fig.savefig(str(save_path), dpi=150)
     assert save_path.exists()
     assert save_path.stat().st_size > 0
     renderer.close()
 
 
-def test_boundary_lines_drawn_as_line2d_rectangular():
-    track = RectangularTrack()
+def test_boundary_lines_drawn_as_line2d():
+    track = _track()
+    x, y, heading = track.start_position
     renderer = MatplotlibRenderer(track, headless=True)
-    state = CarState(x=1.0, y=1.0, heading=0.5, velocity=2.0)
-    renderer.render(state)
-    lines = renderer.ax.get_lines()
-    assert len(lines) > 0
-    assert "#666666" in {line.get_color() for line in lines}
-    renderer.close()
-
-
-def test_boundary_lines_drawn_as_line2d_circular():
-    track = CircularTrack(radius=6.0, track_width=2.0)
-    renderer = MatplotlibRenderer(track, headless=True)
-    state = CarState(x=0.0, y=-6.0, heading=0.0, velocity=2.0)
-    renderer.render(state)
+    renderer.render(CarState(x=x, y=y, heading=heading, velocity=2.0))
     lines = renderer.ax.get_lines()
     assert len(lines) > 0
     assert "#666666" in {line.get_color() for line in lines}
@@ -78,9 +51,10 @@ def test_boundary_lines_drawn_as_line2d_circular():
 
 
 def test_recording_saves_nonempty_gif(tmp_path):
-    track = RectangularTrack()
+    track = _track()
+    x, y, heading = track.start_position
     renderer = MatplotlibRenderer(track, headless=True)
-    state = CarState(x=1.0, y=1.0, heading=0.5, velocity=2.0)
+    state = CarState(x=x, y=y, heading=heading, velocity=2.0)
     renderer.start_recording()
     renderer.render(state, step=0, reward=0.1)
     renderer.render(state, step=1, reward=0.2)
@@ -92,9 +66,10 @@ def test_recording_saves_nonempty_gif(tmp_path):
 
 
 def test_recording_gif_expected_frame_count(tmp_path):
-    track = RectangularTrack()
+    track = _track()
+    x, y, heading = track.start_position
     renderer = MatplotlibRenderer(track, headless=True)
-    state = CarState(x=1.0, y=1.0, heading=0.5, velocity=2.0)
+    state = CarState(x=x, y=y, heading=heading, velocity=2.0)
     renderer.start_recording()
     n_frames = 5
     for i in range(n_frames):
@@ -107,51 +82,22 @@ def test_recording_gif_expected_frame_count(tmp_path):
     renderer.close()
 
 
-def test_recording_headless_works(tmp_path):
-    track = CircularTrack(radius=6.0, track_width=2.0)
-    renderer = MatplotlibRenderer(track, headless=True)
-    state = CarState(x=0.0, y=-6.0, heading=0.0, velocity=2.0)
-    renderer.start_recording()
-    renderer.render(state)
-    gif_path = tmp_path / "headless_test.gif"
-    renderer.save_animation(str(gif_path), fps=10)
-    assert gif_path.exists()
-    assert gif_path.stat().st_size > 0
-    renderer.close()
-
-
 def test_save_animation_without_recording_raises_error(tmp_path):
-    track = RectangularTrack()
-    renderer = MatplotlibRenderer(track, headless=True)
-    gif_path = tmp_path / "empty.gif"
+    renderer = MatplotlibRenderer(_track(), headless=True)
     with pytest.raises(RuntimeError, match="No frames recorded"):
-        renderer.save_animation(str(gif_path))
+        renderer.save_animation(str(tmp_path / "empty.gif"))
     renderer.close()
 
 
 def test_save_animation_after_stop_recording_raises_error(tmp_path):
-    track = RectangularTrack()
+    track = _track()
+    x, y, heading = track.start_position
     renderer = MatplotlibRenderer(track, headless=True)
-    state = CarState(x=1.0, y=1.0, heading=0.5, velocity=2.0)
     renderer.start_recording()
-    renderer.render(state)
+    renderer.render(CarState(x=x, y=y, heading=heading, velocity=2.0))
     renderer.stop_recording(clear=True)
-    gif_path = tmp_path / "stopped.gif"
     with pytest.raises(RuntimeError, match="No frames recorded"):
-        renderer.save_animation(str(gif_path))
-    renderer.close()
-
-
-def test_headless_renderer_saves_figure(tmp_path):
-    track = RectangularTrack()
-    renderer = MatplotlibRenderer(track, headless=True)
-    state = CarState(x=1.0, y=1.0, heading=0.5, velocity=2.0)
-    renderer.render(state, step=0, reward=0.1)
-    renderer.render(state, step=1, reward=0.2)
-    save_path = tmp_path / "test_output.png"
-    renderer.fig.savefig(str(save_path), dpi=150)
-    assert save_path.exists()
-    assert save_path.stat().st_size > 0
+        renderer.save_animation(str(tmp_path / "stopped.gif"))
     renderer.close()
 
 
@@ -159,126 +105,13 @@ def test_save_animation_without_pillow_raises_import_error(tmp_path):
     import sys
     from unittest.mock import patch
 
-    track = RectangularTrack()
+    track = _track()
+    x, y, heading = track.start_position
     renderer = MatplotlibRenderer(track, headless=True)
-    state = CarState(x=1.0, y=1.0, heading=0.5, velocity=2.0)
     renderer.start_recording()
-    renderer.render(state)
-    gif_path = tmp_path / "no_pillow.gif"
+    renderer.render(CarState(x=x, y=y, heading=heading, velocity=2.0))
 
     with patch.dict(sys.modules, {"PIL": None, "PIL.Image": None}):
         with pytest.raises(ImportError, match="Pillow is required for GIF recording"):
-            renderer.save_animation(str(gif_path))
-    renderer.close()
-
-
-# ── Figure8Track Renderer Tests ──────────────────────────────────────
-
-
-def test_renderer_can_be_instantiated_with_figure8_track():
-    track = Figure8Track(radius=6.0, track_width=2.0)
-    renderer = MatplotlibRenderer(track)
-    assert renderer is not None
-    assert renderer.fig is not None
-    assert renderer.ax is not None
-    renderer.close()
-
-
-def test_renderer_renders_state_with_figure8_track():
-    track = Figure8Track(radius=6.0, track_width=2.0)
-    renderer = MatplotlibRenderer(track)
-    gx, gy = track.goal_position
-    state = CarState(x=float(gx), y=float(gy), heading=0.0, velocity=2.0)
-    renderer.render(state, step=0, reward=0.1)
-    renderer.close()
-
-
-def test_boundary_lines_drawn_as_line2d_figure8():
-    track = Figure8Track(radius=6.0, track_width=2.0)
-    renderer = MatplotlibRenderer(track, headless=True)
-    gx, gy = track.goal_position
-    state = CarState(x=float(gx), y=float(gy), heading=0.0, velocity=2.0)
-    renderer.render(state)
-    lines = renderer.ax.get_lines()
-    assert len(lines) > 0
-    assert "#666666" in {line.get_color() for line in lines}
-    renderer.close()
-
-
-def test_headless_figure8_renderer_saves_figure(tmp_path):
-    track = Figure8Track(radius=6.0, track_width=2.0)
-    renderer = MatplotlibRenderer(track, headless=True)
-    gx, gy = track.goal_position
-    state = CarState(x=float(gx), y=float(gy), heading=0.0, velocity=2.0)
-    renderer.render(state, step=0, reward=0.1)
-    renderer.render(state, step=1, reward=0.2)
-    save_path = tmp_path / "test_figure8_output.png"
-    renderer.fig.savefig(str(save_path), dpi=150)
-    assert save_path.exists()
-    assert save_path.stat().st_size > 0
-    renderer.close()
-
-
-def test_recording_figure8_saves_nonempty_gif(tmp_path):
-    track = Figure8Track(radius=6.0, track_width=2.0)
-    renderer = MatplotlibRenderer(track, headless=True)
-    gx, gy = track.goal_position
-    state = CarState(x=float(gx), y=float(gy), heading=0.0, velocity=2.0)
-    renderer.start_recording()
-    renderer.render(state, step=0, reward=0.1)
-    renderer.render(state, step=1, reward=0.2)
-    gif_path = tmp_path / "test_figure8.gif"
-    renderer.save_animation(str(gif_path), fps=10)
-    assert gif_path.exists()
-    assert gif_path.stat().st_size > 0
-    renderer.close()
-
-
-# ── Reward Line Rendering Tests ───────────────────────────────────────
-
-
-def test_renderer_accepts_reward_line_progress():
-    track = RectangularTrack()
-    reward_progress = [0.25, 0.5, 0.75]
-    renderer = MatplotlibRenderer(track, headless=True, reward_line_progress=reward_progress)
-    assert len(renderer._reward_line_endpoints) == 3
-    renderer.close()
-
-
-def test_reward_lines_drawn_when_provided():
-    track = RectangularTrack()
-    reward_progress = [0.25, 0.5, 0.75]
-    renderer = MatplotlibRenderer(track, headless=True, reward_line_progress=reward_progress)
-    state = CarState(x=0.0, y=0.0, heading=0.0, velocity=0.0)
-    renderer.render(state)
-    lines = renderer.ax.get_lines()
-    # Should contain the reward lines with #2e86c1 color
-    assert any("#2e86c1" in str(line.get_color()) for line in lines)
-    renderer.close()
-
-
-def test_reward_lines_empty_when_not_provided():
-    track = RectangularTrack()
-    renderer = MatplotlibRenderer(track, headless=True)
-    assert len(renderer._reward_line_endpoints) == 0
-    renderer.close()
-
-
-def test_renderer_title_includes_rollout_stats():
-    track = RectangularTrack()
-    renderer = MatplotlibRenderer(track, headless=True)
-    state = CarState(x=0.0, y=0.0, heading=0.0, velocity=0.0)
-    renderer.render(
-        state,
-        step=3,
-        reward=0.6,
-        total_reward=4.2,
-        lap_count=1,
-        reward_lines_crossed=2,
-    )
-    title = renderer.ax.get_title()
-    assert "step_reward=0.60" in title
-    assert "total=4.20" in title
-    assert "laps=1" in title
-    assert "lines=2" in title
+            renderer.save_animation(str(tmp_path / "no_pillow.gif"))
     renderer.close()

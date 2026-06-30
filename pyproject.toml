@@ -1,7 +1,7 @@
 [project]
 name = "numpy-rl-racer"
 version = "0.1.0"
-description = "A NumPy-only Deep RL racing environment and agent from scratch."
+description = "A NumPy-only DQN racing agent for generated 2D tracks."
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=2.0.0",

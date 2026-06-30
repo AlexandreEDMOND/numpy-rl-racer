@@ -16,270 +16,166 @@ class Obstacle:
 CAR_COLLISION_RADIUS = 0.3
 
 
-class RectangularTrack:
-    def __init__(self, width=10.0, height=8.0, track_width=2.0):
-        self.half_w = np.float64(width / 2.0)
-        self.half_h = np.float64(height / 2.0)
-        self.track_width = np.float64(track_width)
-        self._perimeter = 4.0 * (self.half_w + self.half_h)
+class ProceduralTrack:
+    def __init__(
+        self,
+        seed=0,
+        radius=6.0,
+        track_width=2.0,
+        num_control_points=12,
+        radial_noise=0.28,
+        smoothing_steps=3,
+    ):
+        if num_control_points < 5:
+            raise ValueError("num_control_points must be >= 5")
+        if radius <= 0.0:
+            raise ValueError("radius must be > 0")
+        if track_width <= 0.0:
+            raise ValueError("track_width must be > 0")
+        if radial_noise < 0.0:
+            raise ValueError("radial_noise must be >= 0")
+        if smoothing_steps < 0:
+            raise ValueError("smoothing_steps must be >= 0")
 
-    @property
-    def goal_position(self):
-        return (np.float64(0.0), -self.half_h)
-
-    @property
-    def start_position(self):
-        return (np.float64(0.0), -self.half_h, np.float64(0.0))
-
-    def sample_centerline_point(self, rng=None):
-        rng = np.random if rng is None else rng
-        hw, hh = self.half_w, self.half_h
-        r = rng.uniform(0.0, self._perimeter)
-        cum = np.float64(0.0)
-        for x1, y1, x2, y2 in _centerline_edges(hw, hh):
-            sx = x2 - x1
-            sy = y2 - y1
-            seg_len = np.sqrt(sx * sx + sy * sy)
-            cum_next = cum + seg_len
-            if r <= cum_next:
-                t = np.float64(0.0) if seg_len == 0.0 else (r - cum) / seg_len
-                cx = x1 + t * sx
-                cy = y1 + t * sy
-                angle = np.arctan2(sy, sx)
-                return (cx, cy, angle)
-            cum = cum_next
-        return self.start_position
-
-    def progress_along_centerline(self, x, y):
-        px, py = np.float64(x), np.float64(y)
-        hw, hh = self.half_w, self.half_h
-
-        best_dist = np.inf
-        best_cumulative = np.float64(0.0)
-        cum_len = np.float64(0.0)
-
-        for x1, y1, x2, y2 in _centerline_edges(hw, hh):
-            sx = x2 - x1
-            sy = y2 - y1
-            seg_len = np.sqrt(sx * sx + sy * sy)
-            seg_len_sq = seg_len * seg_len
-            if seg_len_sq == 0.0:
-                cum_len += seg_len
-                continue
-            t = ((px - x1) * sx + (py - y1) * sy) / seg_len_sq
-            t = np.clip(t, 0.0, 1.0)
-            cx = x1 + t * sx
-            cy = y1 + t * sy
-            dx = px - cx
-            dy = py - cy
-            dist = np.sqrt(dx * dx + dy * dy)
-            cumulative = cum_len + t * seg_len
-            if dist < best_dist:
-                best_dist = dist
-                best_cumulative = cumulative
-            cum_len += seg_len
-
-        return best_cumulative / self._perimeter
-
-    def is_on_track(self, x, y):
-        px, py = np.float64(x), np.float64(y)
-        hw, hh = self.half_w, self.half_h
-        tw2 = self.track_width / 2.0
-
-        for x1, y1, x2, y2 in _rectangle_edges(hw, hh):
-            if _point_to_segment_dist(px, py, x1, y1, x2, y2) <= tw2:
-                return True
-        return False
-
-    def get_centerline_point(self, progress):
-        target_len = progress * self._perimeter
-        cum_len = np.float64(0.0)
-        for x1, y1, x2, y2 in _centerline_edges(self.half_w, self.half_h):
-            sx = x2 - x1
-            sy = y2 - y1
-            seg_len = np.sqrt(sx * sx + sy * sy)
-            cum_next = cum_len + seg_len
-            if target_len <= cum_next:
-                t = np.float64(0.0) if seg_len == 0.0 else (target_len - cum_len) / seg_len
-                cx = x1 + t * sx
-                cy = y1 + t * sy
-                angle = np.arctan2(sy, sx)
-                return (np.float64(cx), np.float64(cy), np.float64(angle))
-            cum_len = cum_next
-        return self.start_position
-
-    def centerline_info(self, x, y):
-        px, py = np.float64(x), np.float64(y)
-        hw, hh = self.half_w, self.half_h
-
-        best_dist = np.inf
-        best_angle = np.float64(0.0)
-
-        for x1, y1, x2, y2 in _centerline_edges(hw, hh):
-            sx = x2 - x1
-            sy = y2 - y1
-            seg_len_sq = sx * sx + sy * sy
-            if seg_len_sq == 0.0:
-                continue
-            t = ((px - x1) * sx + (py - y1) * sy) / seg_len_sq
-            t = np.clip(t, 0.0, 1.0)
-            cx = x1 + t * sx
-            cy = y1 + t * sy
-            dx = px - cx
-            dy = py - cy
-            dist = np.sqrt(dx * dx + dy * dy)
-            angle = np.arctan2(sy, sx)
-            if dist < best_dist:
-                best_dist = dist
-                best_angle = angle
-
-        return best_dist, best_angle
-
-
-class CircularTrack:
-    def __init__(self, radius=6.0, track_width=2.0):
+        self.seed = seed
         self.radius = np.float64(radius)
         self.track_width = np.float64(track_width)
-        self._perimeter = np.float64(2.0 * np.pi * radius)
+        self.num_control_points = int(num_control_points)
+        self.radial_noise = np.float64(radial_noise)
+        self.smoothing_steps = int(smoothing_steps)
+
+        rng = np.random.RandomState(seed)
+        points = self._generate_control_points(rng)
+        for _ in range(self.smoothing_steps):
+            points = _chaikin_closed(points)
+        self._set_centerline(points)
 
     @property
     def half_w(self):
-        return self.radius
+        return np.float64(max(abs(self.x_min), abs(self.x_max)))
 
     @property
     def half_h(self):
-        return self.radius
+        return np.float64(max(abs(self.y_min), abs(self.y_max)))
 
     @property
     def goal_position(self):
-        return (np.float64(0.0), -self.radius)
+        x, y, _ = self.start_position
+        return (x, y)
 
     @property
     def start_position(self):
-        return (np.float64(0.0), -self.radius, np.float64(0.0))
-
-    def sample_centerline_point(self, rng=None):
-        rng = np.random if rng is None else rng
-        theta = rng.uniform(0.0, 2.0 * np.pi)
-        x = self.radius * np.sin(theta)
-        y = -self.radius * np.cos(theta)
-        return (x, y, theta)
-
-    def progress_along_centerline(self, x, y):
-        px, py = np.float64(x), np.float64(y)
-        angle = np.arctan2(px, -py)
-        if angle < 0:
-            angle += 2.0 * np.pi
-        return angle / (2.0 * np.pi)
-
-    def is_on_track(self, x, y):
-        px, py = np.float64(x), np.float64(y)
-        dist = np.sqrt(px * px + py * py)
-        tw2 = self.track_width / 2.0
-        return (self.radius - tw2) <= dist <= (self.radius + tw2)
-
-    def get_centerline_point(self, progress):
-        theta = progress * np.float64(2.0 * np.pi)
-        x = self.radius * np.sin(theta)
-        y = -self.radius * np.cos(theta)
-        return (np.float64(x), np.float64(y), np.float64(theta))
-
-    def centerline_info(self, x, y):
-        px, py = np.float64(x), np.float64(y)
-        dist = np.sqrt(px * px + py * py)
-        dist_to_centerline = np.abs(dist - self.radius)
-        angle = np.arctan2(px, -py)
-        return dist_to_centerline, angle
-
-
-class Figure8Track:
-    def __init__(self, radius=6.0, track_width=2.0):
-        self.radius = np.float64(radius)
-        self.track_width = np.float64(track_width)
-        self._n = 2000
-        self._theta_offset = 7.0 * np.pi / 4.0
-        self._precompute()
-
-    def _precompute(self):
-        n = self._n
-        self._t_vals = np.linspace(0.0, 1.0, n, endpoint=False)
-        thetas = 2.0 * np.pi * self._t_vals + self._theta_offset
-        ct = np.cos(thetas)
-        st = np.sin(thetas)
-        self._cs_x = self.radius * ct
-        self._cs_y = self.radius * st * ct
-        self._cs_tangents = np.arctan2(np.cos(2.0 * thetas), -np.sin(thetas))
-
-    @property
-    def goal_position(self):
-        theta = self._theta_offset
-        x = self.radius * np.cos(theta)
-        y = self.radius * np.sin(theta) * np.cos(theta)
-        return (np.float64(x), np.float64(y))
-
-    @property
-    def start_position(self):
-        gx, gy = self.goal_position
-        return (gx, gy, np.float64(0.0))
-
-    @property
-    def half_w(self):
-        return self.radius
-
-    @property
-    def half_h(self):
-        return self.radius * np.float64(0.5)
-
-    def sample_centerline_point(self, t=None, rng=None):
-        rng = np.random if rng is None else rng
-        if t is None:
-            t = rng.uniform(0.0, 1.0)
-        theta = 2.0 * np.pi * t + self._theta_offset
-        x = self.radius * np.cos(theta)
-        y = self.radius * np.sin(theta) * np.cos(theta)
-        tangent = np.arctan2(np.cos(2.0 * theta), -np.sin(theta))
+        x, y = self.centerline_points[0]
+        tangent = self._segment_angles[0]
         return (np.float64(x), np.float64(y), np.float64(tangent))
 
+    def sample_centerline_point(self, rng=None):
+        rng = np.random if rng is None else rng
+        return self.get_centerline_point(rng.uniform(0.0, 1.0))
+
     def progress_along_centerline(self, x, y):
-        px, py = np.float64(x), np.float64(y)
-        dx = self._cs_x - px
-        dy = self._cs_y - py
-        dist_sq = dx * dx + dy * dy
-        best_idx = np.argmin(dist_sq)
-        return self._t_vals[best_idx]
+        _, _, _, progress = self._nearest_centerline_projection(x, y)
+        return progress
 
     def is_on_track(self, x, y):
-        px, py = np.float64(x), np.float64(y)
-        dx = self._cs_x - px
-        dy = self._cs_y - py
-        dist_sq = dx * dx + dy * dy
-        min_dist = np.sqrt(np.min(dist_sq))
-        tw2 = self.track_width / np.float64(2.0)
-        return min_dist <= tw2
+        dist, _, _, _ = self._nearest_centerline_projection(x, y)
+        return dist <= self.track_width / np.float64(2.0)
 
     def get_centerline_point(self, progress):
-        return self.sample_centerline_point(t=np.clip(progress, 0.0, 1.0))
+        progress = np.float64(progress) % np.float64(1.0)
+        target_len = progress * self._perimeter
+        idx = int(np.searchsorted(self._cum_lengths[1:], target_len, side="right"))
+        idx = min(idx, len(self._segments) - 1)
+        seg_start_len = self._cum_lengths[idx]
+        seg_len = self._segment_lengths[idx]
+        t = np.float64(0.0) if seg_len == 0.0 else (target_len - seg_start_len) / seg_len
+        point = self._seg_starts[idx] + t * self._segments[idx]
+        angle = self._segment_angles[idx]
+        return (np.float64(point[0]), np.float64(point[1]), np.float64(angle))
 
     def centerline_info(self, x, y):
-        px, py = np.float64(x), np.float64(y)
-        dx = self._cs_x - px
-        dy = self._cs_y - py
-        dist_sq = dx * dx + dy * dy
-        best_idx = np.argmin(dist_sq)
-        dist = np.sqrt(dist_sq[best_idx])
-        tangent = self._cs_tangents[best_idx]
-        return (dist, tangent)
+        dist, _, angle, _ = self._nearest_centerline_projection(x, y)
+        return (np.float64(dist), np.float64(angle))
+
+    def _generate_control_points(self, rng):
+        n = self.num_control_points
+        base_angles = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
+        angle_step = 2.0 * np.pi / n
+        jitter = rng.uniform(-0.25 * angle_step, 0.25 * angle_step, size=n)
+        angles = base_angles + jitter - np.pi / 2.0
+        radii = self.radius * (1.0 + rng.uniform(-self.radial_noise, self.radial_noise, size=n))
+        points = np.column_stack([radii * np.cos(angles), radii * np.sin(angles)])
+        start_idx = int(np.argmin(points[:, 1] + 0.15 * np.abs(points[:, 0])))
+        return np.roll(points, -start_idx, axis=0).astype(np.float64)
+
+    def _set_centerline(self, points):
+        self.centerline_points = np.asarray(points, dtype=np.float64)
+        self._seg_starts = self.centerline_points
+        self._seg_ends = np.roll(self.centerline_points, -1, axis=0)
+        self._segments = self._seg_ends - self._seg_starts
+        self._segment_lengths = np.sqrt(np.sum(self._segments * self._segments, axis=1))
+        if np.any(self._segment_lengths <= 1e-12):
+            raise ValueError("generated track contains a degenerate segment")
+        self._perimeter = np.float64(np.sum(self._segment_lengths))
+        self._cum_lengths = np.concatenate([
+            np.array([0.0], dtype=np.float64),
+            np.cumsum(self._segment_lengths),
+        ])
+        self._segment_angles = np.arctan2(self._segments[:, 1], self._segments[:, 0])
+        self._compute_boundaries()
+
+    def _compute_boundaries(self):
+        prev_angles = np.roll(self._segment_angles, 1)
+        avg_x = np.cos(prev_angles) + np.cos(self._segment_angles)
+        avg_y = np.sin(prev_angles) + np.sin(self._segment_angles)
+        tangents = np.arctan2(avg_y, avg_x)
+        normals = np.column_stack([-np.sin(tangents), np.cos(tangents)])
+        half_tw = self.track_width / np.float64(2.0)
+
+        self.left_boundary = self.centerline_points + normals * half_tw
+        self.right_boundary = self.centerline_points - normals * half_tw
+        self.outer_boundary = np.vstack([self.left_boundary, self.left_boundary[:1]])
+        self.inner_boundary = np.vstack([self.right_boundary, self.right_boundary[:1]])
+
+        left_segments = _segments_from_closed_points(self.left_boundary)
+        right_segments = _segments_from_closed_points(self.right_boundary)
+        self.boundary_segments = np.vstack([left_segments, right_segments]).astype(np.float64)
+
+        all_points = np.vstack([self.left_boundary, self.right_boundary])
+        margin = float(self.track_width)
+        self.x_min = np.float64(np.min(all_points[:, 0]) - margin)
+        self.x_max = np.float64(np.max(all_points[:, 0]) + margin)
+        self.y_min = np.float64(np.min(all_points[:, 1]) - margin)
+        self.y_max = np.float64(np.max(all_points[:, 1]) + margin)
+
+    def _nearest_centerline_projection(self, x, y):
+        p = np.array([x, y], dtype=np.float64)
+        v = p - self._seg_starts
+        seg_len_sq = self._segment_lengths * self._segment_lengths
+        t = np.sum(v * self._segments, axis=1) / seg_len_sq
+        t = np.clip(t, 0.0, 1.0)
+        projected = self._seg_starts + t[:, None] * self._segments
+        delta = p - projected
+        dist_sq = np.sum(delta * delta, axis=1)
+        idx = int(np.argmin(dist_sq))
+        distance = np.sqrt(dist_sq[idx])
+        progress = (self._cum_lengths[idx] + t[idx] * self._segment_lengths[idx]) / self._perimeter
+        if progress >= 1.0:
+            progress = np.float64(0.0)
+        return distance, projected[idx], self._segment_angles[idx], np.float64(progress)
 
 
 class RacingEnv:
     def __init__(
         self,
-        track_width=10.0,
-        track_height=8.0,
         track_road_width=2.0,
         dt=0.1,
         track=None,
-        track_type='rectangular',
+        track_seed=0,
+        track_radius=6.0,
+        track_points=12,
+        track_variation=0.28,
+        track_smoothing=3,
         randomize_start=True,
         obstacles=None,
         time_penalty=0.0,
@@ -297,16 +193,14 @@ class RacingEnv:
         collision_penalty=5.0,
         step_penalty=0.0,
     ):
-        if track is not None:
-            self.track = track
-        elif track_type == 'circular':
-            radius = min(track_width, track_height) / 2.0
-            self.track = CircularTrack(radius, track_road_width)
-        elif track_type == 'figure8':
-            radius = min(track_width, track_height) / 2.0
-            self.track = Figure8Track(radius, track_road_width)
-        else:
-            self.track = RectangularTrack(track_width, track_height, track_road_width)
+        self.track = track if track is not None else ProceduralTrack(
+            seed=track_seed,
+            radius=track_radius,
+            track_width=track_road_width,
+            num_control_points=track_points,
+            radial_noise=track_variation,
+            smoothing_steps=track_smoothing,
+        )
         if observation_mode not in ("state", "local"):
             raise ValueError(f"observation_mode must be 'state' or 'local', got {observation_mode!r}")
         if reward_mode not in ("legacy", "progress"):
@@ -419,7 +313,6 @@ class RacingEnv:
             if obstacle_collision:
                 reward += np.float64(-1.0)
 
-            # Check reward line crossings
             for i, lp in enumerate(self._reward_line_progress):
                 if self._collected_reward_lines[i]:
                     continue
@@ -463,58 +356,7 @@ class RacingEnv:
     def _compute_lidar_boundary_segments(self):
         if not self.use_lidar and self.observation_mode != "local":
             return np.empty((0, 2, 2), dtype=np.float64)
-
-        segments = []
-
-        if isinstance(self.track, RectangularTrack):
-            hw, hh = self.track.half_w, self.track.half_h
-            edges = _centerline_edges(hw, hh)
-            tw2 = self.track.track_width / np.float64(2.0)
-
-            left_ends = []
-            right_ends = []
-            for (x1, y1, x2, y2) in edges:
-                dx = x2 - x1
-                dy = y2 - y1
-                length = np.sqrt(dx * dx + dy * dy)
-                if length == 0:
-                    continue
-                px = -dy / length
-                py = dx / length
-                ls = (x1 + px * tw2, y1 + py * tw2)
-                le = (x2 + px * tw2, y2 + py * tw2)
-                rs = (x1 - px * tw2, y1 - py * tw2)
-                re = (x2 - px * tw2, y2 - py * tw2)
-                left_ends.append((ls, le))
-                right_ends.append((rs, re))
-                segments.append((ls, le))
-                segments.append((rs, re))
-
-            n = len(edges)
-            for i in range(n):
-                j = (i + 1) % n
-                segments.append((right_ends[i][1], right_ends[j][0]))
-                segments.append((left_ends[i][1], left_ends[j][0]))
-
-        elif isinstance(self.track, Figure8Track):
-            n = self.track._n
-            cs_x = self.track._cs_x
-            cs_y = self.track._cs_y
-            tangents = self.track._cs_tangents
-            tw2 = self.track.track_width / np.float64(2.0)
-
-            px_arr = -np.sin(tangents) * tw2
-            py_arr = np.cos(tangents) * tw2
-            left_x = cs_x + px_arr
-            left_y = cs_y + py_arr
-            right_x = cs_x - px_arr
-            right_y = cs_y - py_arr
-
-            for i in range(n - 1):
-                segments.append(((left_x[i], left_y[i]), (left_x[i + 1], left_y[i + 1])))
-                segments.append(((right_x[i], right_y[i]), (right_x[i + 1], right_y[i + 1])))
-
-        return np.array(segments, dtype=np.float64)
+        return np.asarray(self.track.boundary_segments, dtype=np.float64)
 
     def _lidar_readings(self):
         return self._ray_readings(self._lidar_angles)
@@ -532,26 +374,13 @@ class RacingEnv:
         max_range = self.lidar_max_range
         min_dists = np.full(num_rays, max_range, dtype=np.float64)
 
-        # Track boundary intersection
-        if isinstance(self.track, CircularTrack):
-            R = self.track.radius
-            tw2 = self.track.track_width / np.float64(2.0)
-            for cr in [R - tw2, R + tw2]:
-                if cr > 0:
-                    for i in range(num_rays):
-                        d = _ray_circle_intersection_distance(origin, dirs[i], np.zeros(2, dtype=np.float64), cr)
-                        if d < min_dists[i]:
-                            min_dists[i] = d
-        else:
-            segments = self._lidar_boundary_segments
-            n_seg = len(segments)
-            if n_seg > 0:
-                for i in range(num_rays):
-                    d_vec = _ray_segments_distances_vector(origin, dirs[i], segments)
-                    if d_vec < min_dists[i]:
-                        min_dists[i] = d_vec
+        segments = self._lidar_boundary_segments
+        if len(segments) > 0:
+            for i in range(num_rays):
+                d_vec = _ray_segments_distances_vector(origin, dirs[i], segments)
+                if d_vec < min_dists[i]:
+                    min_dists[i] = d_vec
 
-        # Obstacle intersection
         for obs in self.obstacles:
             center = np.array([obs.x, obs.y], dtype=np.float64)
             r = obs.radius
@@ -626,63 +455,21 @@ def reward_line_endpoints(track, progress):
     return ((np.float64(x1), np.float64(y1)), (np.float64(x2), np.float64(y2)))
 
 
-def _centerline_edges(hw, hh):
-    return [
-        (0, -hh, hw, -hh),
-        (hw, -hh, hw, hh),
-        (hw, hh, -hw, hh),
-        (-hw, hh, -hw, -hh),
-        (-hw, -hh, 0, -hh),
-    ]
+def _chaikin_closed(points):
+    p0 = np.asarray(points, dtype=np.float64)
+    p1 = np.roll(p0, -1, axis=0)
+    q = 0.75 * p0 + 0.25 * p1
+    r = 0.25 * p0 + 0.75 * p1
+    out = np.empty((len(points) * 2, 2), dtype=np.float64)
+    out[0::2] = q
+    out[1::2] = r
+    return out
 
 
-def _rectangle_edges(hw, hh):
-    return [
-        (-hw, -hh, hw, -hh),
-        (hw, -hh, hw, hh),
-        (hw, hh, -hw, hh),
-        (-hw, hh, -hw, -hh),
-    ]
-
-
-def _default_obstacles(track):
-    if hasattr(track, 'radius'):
-        R = float(track.radius)
-        obstacles = [
-            Obstacle(0.0, 0.0, 0.5),
-            Obstacle(R * 0.35, R * 0.35, 0.45),
-            Obstacle(-R * 0.35, -R * 0.35, 0.4),
-        ]
-    else:
-        hw = float(track.half_w)
-        hh = float(track.half_h)
-        inner_hw = hw - track.track_width
-        inner_hh = hh - track.track_width
-        obstacles = [
-            Obstacle(0.0, 0.0, 0.5),
-            Obstacle(inner_hw * 0.6, -inner_hh * 0.4, 0.45),
-            Obstacle(-inner_hw * 0.5, inner_hh * 0.5, 0.4),
-        ]
-    return obstacles
-
-
-def _ray_segment_intersection_distance(origin, direction, p1, p2):
-    o = np.asarray(origin, dtype=np.float64)
-    d = np.asarray(direction, dtype=np.float64)
-    a = np.asarray(p1, dtype=np.float64)
-    b = np.asarray(p2, dtype=np.float64)
-    seg_dir = b - a
-    cross_d_seg = d[0] * seg_dir[1] - d[1] * seg_dir[0]
-    if abs(cross_d_seg) < 1e-12:
-        return np.inf
-    w = o - a
-    t = (w[0] * seg_dir[1] - w[1] * seg_dir[0]) / cross_d_seg
-    if t <= 1e-12:
-        return np.inf
-    s = (d[0] * w[1] - d[1] * w[0]) / cross_d_seg
-    if s < 0.0 or s > 1.0:
-        return np.inf
-    return t
+def _segments_from_closed_points(points):
+    starts = np.asarray(points, dtype=np.float64)
+    ends = np.roll(starts, -1, axis=0)
+    return np.stack([starts, ends], axis=1)
 
 
 def _ray_segments_distances_vector(origin, direction, segments):
@@ -725,20 +512,3 @@ def _ray_circle_intersection_distance(origin, direction, center, radius):
     if t2 > 1e-12:
         return t2
     return np.inf
-
-
-def _point_to_segment_dist(px, py, x1, y1, x2, y2):
-    sx = x2 - x1
-    sy = y2 - y1
-    seg_len_sq = sx * sx + sy * sy
-    if seg_len_sq == 0.0:
-        dx = px - x1
-        dy = py - y1
-        return np.sqrt(dx * dx + dy * dy)
-    t = ((px - x1) * sx + (py - y1) * sy) / seg_len_sq
-    t = np.clip(t, 0.0, 1.0)
-    cx = x1 + t * sx
-    cy = y1 + t * sy
-    dx = px - cx
-    dy = py - cy
-    return np.sqrt(dx * dx + dy * dy)

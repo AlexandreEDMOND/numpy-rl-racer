@@ -10,56 +10,29 @@ import pytest
 import numpy as np
 
 from numpy_rl_racer.agent.dqn import DQNAgent
-from numpy_rl_racer.env import CircularTrack, Obstacle, RacingEnv, RectangularTrack
+from numpy_rl_racer.env import Obstacle, ProceduralTrack, RacingEnv
 
 
 def _parse_track(args=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--track", choices=["rectangular", "circular", "figure8"], default="circular")
+    parser.add_argument("--track", choices=["procedural"], default="procedural")
     parsed = parser.parse_args(args)
-    if parsed.track == "circular":
-        track = CircularTrack(radius=6.0, track_width=2.0)
-        return RacingEnv(track=track), parsed.track
-    elif parsed.track == "figure8":
-        from numpy_rl_racer.env.racing_env import Figure8Track
-        track = Figure8Track(radius=6.0, track_width=2.0)
-        return RacingEnv(track=track), parsed.track
-    else:
-        return RacingEnv(), parsed.track
+    return RacingEnv(track=ProceduralTrack(seed=0)), parsed.track
 
 
-def test_default_track_is_circular():
+def test_default_track_is_procedural():
     env, track_type = _parse_track([])
-    assert track_type == "circular"
-    assert isinstance(env.track, CircularTrack)
+    assert track_type == "procedural"
+    assert isinstance(env.track, ProceduralTrack)
 
 
-def test_explicit_rectangular_track():
-    env, track_type = _parse_track(["--track", "rectangular"])
-    assert track_type == "rectangular"
-    assert isinstance(env.track, RectangularTrack)
-
-
-def test_circular_track():
-    env, track_type = _parse_track(["--track", "circular"])
-    assert track_type == "circular"
-    assert isinstance(env.track, CircularTrack)
-
-
-def test_figure8_track():
-    env, track_type = _parse_track(["--track", "figure8"])
-    assert track_type == "figure8"
-    from numpy_rl_racer.env.racing_env import Figure8Track
-    assert isinstance(env.track, Figure8Track)
-
-
-def test_train_figure8_runs(tmp_path):
+def test_train_procedural_runs(tmp_path):
     main = _make_main()
     with patch.object(DQNAgent, "act", return_value=0), \
          patch.object(DQNAgent, "train_step", return_value=0.0), \
          patch.object(DQNAgent, "save"):
         main([
-            "--track", "figure8",
+            "--track", "procedural",
             "--episodes", "1",
             "--max-steps", "1",
             "--save-dir", str(tmp_path),
@@ -706,8 +679,7 @@ def test_obstacles_seed_determinism(tmp_path):
     sys.path.insert(0, scripts_dir)
     try:
         from train import _generate_obstacles
-        from numpy_rl_racer.env import RectangularTrack
-        track = RectangularTrack()
+        track = ProceduralTrack(seed=0)
         obs1 = _generate_obstacles(track, 3, seed=42)
         obs2 = _generate_obstacles(track, 3, seed=42)
         obs3 = _generate_obstacles(track, 3, seed=99)
