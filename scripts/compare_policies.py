@@ -6,15 +6,13 @@ import os
 import numpy as np
 
 from numpy_rl_racer.agent import DQNAgent, ACTIONS
-from numpy_rl_racer.env import CircularTrack, RacingEnv
+from numpy_rl_racer.env import ProceduralTrack, RacingEnv
 from numpy_rl_racer.rendering import MatplotlibRenderer
 
 
-def _make_env(track_name):
-    if track_name == "circular":
-        track = CircularTrack(radius=6.0, track_width=2.0)
-        return RacingEnv(track=track)
-    return RacingEnv()
+def _make_env(track_seed):
+    track = ProceduralTrack(seed=track_seed, radius=6.0, track_width=2.0)
+    return RacingEnv(track=track)
 
 
 def _load_agent(model_path):
@@ -78,8 +76,8 @@ def _record_episode(env, get_action, max_steps, seed):
 def _save_comparison_gif(agent, args):
     os.makedirs(args.save_dir, exist_ok=True)
 
-    trained_env = _make_env(args.track)
-    random_env = _make_env(args.track)
+    trained_env = _make_env(args.track_seed)
+    random_env = _make_env(args.track_seed)
     rng = np.random.RandomState(args.random_seed)
 
     trained_frames = _record_episode(
@@ -133,8 +131,8 @@ def _step_policy(env, state, action_idx, total_reward):
 def _render_live_comparison(agent, args):
     import matplotlib.pyplot as plt
 
-    trained_env = _make_env(args.track)
-    random_env = _make_env(args.track)
+    trained_env = _make_env(args.track_seed)
+    random_env = _make_env(args.track_seed)
     rng = np.random.RandomState(args.random_seed)
 
     trained_state = trained_env.reset(seed=args.seed)
@@ -214,7 +212,7 @@ def main(argv=None):
     parser.add_argument("--model-path", default="models/best_model.npz")
     parser.add_argument("--max-steps", type=int, default=200)
     parser.add_argument("--save-dir", default="images")
-    parser.add_argument("--track", choices=["rectangular", "circular"], default="rectangular")
+    parser.add_argument("--track-seed", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--random-seed", type=int, default=0)
     parser.add_argument("--fps", type=int, default=10)

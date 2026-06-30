@@ -6,7 +6,7 @@ from contextlib import nullcontext
 import numpy as np
 
 from numpy_rl_racer.agent import DQNAgent, ACTIONS
-from numpy_rl_racer.env import CircularTrack, Figure8Track, Obstacle, RacingEnv, RectangularTrack
+from numpy_rl_racer.env import Obstacle, ProceduralTrack, RacingEnv
 from numpy_rl_racer.env.wrappers import ActionRepeatEnv
 from numpy_rl_racer.utils.scheduler import ExponentialDecay, StepDecay
 
@@ -68,24 +68,13 @@ def _evaluate_agent(agent, env, episodes, max_steps, seed, allow_idle_actions):
 def _generate_obstacles(track, num_obstacles, seed=None):
     rng = np.random.RandomState(seed)
     obstacles = []
-    if hasattr(track, 'radius'):
-        R = float(track.radius)
-        inner_r = R - track.track_width
-        for _ in range(num_obstacles):
-            angle = rng.uniform(0, 2 * np.pi)
-            dist = rng.uniform(0, inner_r * 0.85)
-            x = dist * np.cos(angle)
-            y = dist * np.sin(angle)
-            obstacles.append(Obstacle(x, y, rng.uniform(0.3, 0.5)))
-    else:
-        hw = float(track.half_w)
-        hh = float(track.half_h)
-        inner_hw = hw - track.track_width
-        inner_hh = hh - track.track_width
-        for _ in range(num_obstacles):
-            x = rng.uniform(-inner_hw * 0.85, inner_hw * 0.85)
-            y = rng.uniform(-inner_hh * 0.85, inner_hh * 0.85)
-            obstacles.append(Obstacle(x, y, rng.uniform(0.3, 0.5)))
+    for _ in range(num_obstacles):
+        cx, cy, tangent = track.sample_centerline_point(rng=rng)
+        lateral = rng.uniform(-0.25, 0.25) * float(track.track_width)
+        perp_angle = tangent + np.pi / 2.0
+        x = cx + lateral * np.cos(perp_angle)
+        y = cy + lateral * np.sin(perp_angle)
+        obstacles.append(Obstacle(x, y, rng.uniform(0.3, 0.5)))
     return obstacles
 
 
@@ -140,8 +129,18 @@ def main(argv=None):
     parser.add_argument("--save-dir", default="models", help="Directory to save model parameters")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
     parser.add_argument("--log-dir", default=None, help="Directory to save training log CSV")
-    parser.add_argument("--track", choices=["rectangular", "circular", "figure8"], default="circular",
-                        help="Track type to use (default: circular for the v0 baseline)")
+    parser.add_argument("--track", choices=["procedural"], default="procedural",
+                        help="Track type to use")
+    parser.add_argument("--track-seed", type=int, default=0,
+                        help="Seed used to generate the procedural track")
+    parser.add_argument("--track-radius", type=float, default=6.0,
+                        help="Base radius for the procedural track")
+    parser.add_argument("--track-points", type=int, default=12,
+                        help="Number of control points for the procedural track")
+    parser.add_argument("--track-variation", type=float, default=0.28,
+                        help="Radial variation ratio for procedural control points")
+    parser.add_argument("--track-smoothing", type=int, default=3,
+                        help="Number of Chaikin smoothing passes for the procedural track")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor")
@@ -224,12 +223,14 @@ def main(argv=None):
         json.dump(resolved, f, indent=2)
     print(f"Saved configuration to {config_out}")
 
-    if args.track == "circular":
-        track = CircularTrack(radius=6.0, track_width=2.0)
-    elif args.track == "figure8":
-        track = Figure8Track(radius=6.0, track_width=2.0)
-    else:
-        track = RectangularTrack(width=10.0, height=8.0, track_width=2.0)
+    track = ProceduralTrack(
+        seed=args.track_seed,
+        radius=args.track_radius,
+        track_width=2.0,
+        num_control_points=args.track_points,
+        radial_noise=args.track_variation,
+        smoothing_steps=args.track_smoothing,
+    )
 
     obstacles = None
     if args.num_obstacles > 0:

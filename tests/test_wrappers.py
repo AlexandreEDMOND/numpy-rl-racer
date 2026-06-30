@@ -106,9 +106,8 @@ def test_skip_frames_one_is_noop():
     assert info1 == info2
 
 
-@pytest.mark.parametrize("track_type", ["rectangular", "circular", "figure8"])
-def test_compatible_with_all_track_types(track_type):
-    env = RacingEnv(track_type=track_type)
+def test_compatible_with_procedural_track():
+    env = RacingEnv()
     wrapper = ActionRepeatEnv(env, skip_frames=2)
     wrapper.reset(seed=42)
     obs, reward, done, info = wrapper.step(np.array([0.0, 1.0]))
@@ -350,9 +349,8 @@ class TestEpisodeMonitor:
         assert final_stats["avg_speed"] == 1.5
         assert final_stats["max_speed"] == 2.0
 
-    @pytest.mark.parametrize("track_type", ["rectangular", "circular", "figure8"])
-    def test_compatible_with_all_track_types(self, track_type):
-        env = RacingEnv(track_type=track_type)
+    def test_compatible_with_procedural_track(self):
+        env = RacingEnv()
         monitor = EpisodeMonitor(env)
         monitor.reset(seed=42)
         for _ in range(5):
