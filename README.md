@@ -37,6 +37,19 @@ boundaries, centerlines, reward lines, and start/finish markers:
 
 ![Environment overview](images/environment_overview.png)
 
+Compare a trained policy against a random policy on the same generated track:
+
+![Trained policy vs random policy](images/trained_vs_random.gif)
+
+Regenerate the comparison GIF:
+
+```bash
+uv run python scripts/compare_policies.py \
+  --model-path models/best_model.npz \
+  --save-dir images \
+  --track-seed 0
+```
+
 ## Observation
 
 The default training path uses a 9-dimensional local observation:
