@@ -95,16 +95,18 @@ def _save_comparison_gif(agent, args):
 
     from PIL import Image, ImageDraw
 
-    n_frames = min(len(trained_frames), len(random_frames))
+    n_frames = max(len(trained_frames), len(random_frames))
     side_by_side = []
     for i in range(n_frames):
-        h_t, w_t = trained_frames[i].shape[:2]
-        h_r, w_r = random_frames[i].shape[:2]
+        trained_frame = trained_frames[min(i, len(trained_frames) - 1)]
+        random_frame = random_frames[min(i, len(random_frames) - 1)]
+        h_t, w_t = trained_frame.shape[:2]
+        h_r, w_r = random_frame.shape[:2]
         h = max(h_t, h_r)
         w_total = w_t + w_r
         canvas = np.zeros((h, w_total, 3), dtype=np.uint8)
-        canvas[:h_t, :w_t] = trained_frames[i]
-        canvas[:h_r, w_t:w_total] = random_frames[i]
+        canvas[:h_t, :w_t] = trained_frame
+        canvas[:h_r, w_t:w_total] = random_frame
         img = Image.fromarray(canvas)
         draw = ImageDraw.Draw(img)
         draw.text((8, 6), "Trained policy", fill=(0, 200, 0))

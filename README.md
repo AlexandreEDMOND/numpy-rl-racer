@@ -47,7 +47,8 @@ Regenerate the comparison GIF:
 uv run python scripts/compare_policies.py \
   --model-path models/best_model.npz \
   --save-dir images \
-  --track-seed 0
+  --track-seed 4 \
+  --max-steps 400
 ```
 
 ## Observation
@@ -133,7 +134,8 @@ uv run python scripts/evaluate.py \
 uv run python scripts/compare_policies.py \
   --model-path models/best_model.npz \
   --save-dir images/tmp \
-  --track-seed 0
+  --track-seed 4 \
+  --max-steps 400
 ```
 
 ## Procedural Tracks
