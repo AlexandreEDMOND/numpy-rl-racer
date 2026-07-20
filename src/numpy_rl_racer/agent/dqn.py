@@ -2,7 +2,7 @@ import warnings
 
 import numpy as np
 
-from numpy_rl_racer.network import DuelingMLP, MLP, NoisyLinear, SGD
+from numpy_rl_racer.network import Adam, DuelingMLP, MLP, NoisyLinear, SGD
 
 
 class SumTree:
@@ -147,7 +147,8 @@ class DQNAgent:
                  use_double_dqn=True, use_per=False, alpha=0.6, beta0=0.4,
                  beta_anneal_steps=100000, tau=0.0, seed=None,
                  use_dueling_dqn=False, use_noisy=False, n_step=1, scheduler=None,
-                 momentum=0.0, weight_decay=0.0, max_grad_norm=None):
+                 momentum=0.0, weight_decay=0.0, max_grad_norm=None,
+                 optimizer="sgd", betas=(0.9, 0.999), eps=1e-8):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
         self.state_dim = state_dim
@@ -172,7 +173,21 @@ class DQNAgent:
             epsilon_min = 0.0
             epsilon_decay = 1.0
         self._hard_update_target()
-        self.optimizer = SGD(self.online_net, lr=lr, scheduler=scheduler, momentum=momentum, max_grad_norm=max_grad_norm)
+        if optimizer not in ("sgd", "adam"):
+            raise ValueError(
+                f"Unknown optimizer {optimizer!r}; expected 'sgd' or 'adam'"
+            )
+        if optimizer == "adam":
+            self.optimizer = Adam(
+                self.online_net, lr=lr, scheduler=scheduler, betas=betas,
+                eps=eps, weight_decay=weight_decay, max_grad_norm=max_grad_norm,
+            )
+        else:
+            self.optimizer = SGD(
+                self.online_net, lr=lr, scheduler=scheduler,
+                momentum=momentum, max_grad_norm=max_grad_norm,
+            )
+        self.optimizer_type = optimizer
         self.use_per = use_per
         if use_per:
             self.replay_buffer = PrioritizedReplayBuffer(buffer_size, alpha=alpha, beta0=beta0,
@@ -210,7 +225,7 @@ class DQNAgent:
             if hasattr(layer, "sigma_w"):
                 params[f"tlayer_{i}_sigma_w"] = layer.sigma_w
                 params[f"tlayer_{i}_sigma_b"] = layer.sigma_b
-        if self.optimizer._velocities is not None:
+        if isinstance(self.optimizer, SGD) and self.optimizer._velocities is not None:
             for i, layer in enumerate(self.online_net.layers):
                 vel = self.optimizer._velocities.get(layer)
                 if vel is not None:
@@ -219,6 +234,7 @@ class DQNAgent:
                     if hasattr(layer, "sigma_w") and "sigma_w" in vel:
                         params[f"vel_{i}_sigma_w"] = vel["sigma_w"]
                         params[f"vel_{i}_sigma_b"] = vel["sigma_b"]
+        params["optimizer_type"] = np.array(1 if self.optimizer_type == "adam" else 0)
         params["epsilon"] = np.array(self.epsilon)
         params["step_counter"] = np.array(self._step_counter)
         if self.rng is not None:
@@ -323,7 +339,7 @@ class DQNAgent:
                         layer.sigma_b[:] = data[f"tlayer_{i}_sigma_b"]
         else:
             self._hard_update_target()
-        if self.optimizer.momentum > 0 and "vel_0_w" in data:
+        if isinstance(self.optimizer, SGD) and self.optimizer.momentum > 0 and "vel_0_w" in data:
             if self.optimizer._velocities is None:
                 self.optimizer._velocities = {}
             for i, layer in enumerate(self.online_net.layers):

@@ -1,7 +1,100 @@
 import numpy as np
+import pytest
 
 from numpy_rl_racer.agent.dqn import DQNAgent, PrioritizedReplayBuffer, ReplayBuffer, SumTree, N_ACTIONS
-from numpy_rl_racer.network import Dense, MLP, NoisyLinear, SGD
+from numpy_rl_racer.network import Adam, Dense, MLP, NoisyLinear, SGD
+
+
+# -- Adam optimizer integration tests ---------------------------------------
+
+
+def test_dqn_default_optimizer_is_sgd():
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3)
+    assert isinstance(agent.optimizer, SGD)
+    assert agent.optimizer_type == "sgd"
+
+
+def test_dqn_invalid_optimizer_raises():
+    with pytest.raises(ValueError):
+        DQNAgent(state_dim=6, hidden_sizes=[16], optimizer="rmsprop")
+
+
+def test_dqn_adam_optimizer_constructed():
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, optimizer="adam")
+    assert isinstance(agent.optimizer, Adam)
+    assert agent.optimizer_type == "adam"
+
+
+def test_dqn_adam_training_step_runs():
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, batch_size=4,
+                     optimizer="adam")
+    state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    for _ in range(20):
+        action = agent.act(state, training=True)
+        next_state = state + np.random.randn(6) * 0.01
+        reward = 0.1
+        done = False
+        loss = agent.train_step(state, action, reward, next_state, done)
+        if loss > 0:
+            assert np.isfinite(loss)
+
+
+def test_dqn_adam_changes_weights():
+    np.random.seed(0)
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, batch_size=4,
+                     optimizer="adam")
+    states = [np.random.randn(6) for _ in range(4)]
+    for s in states:
+        agent.replay_buffer.push(s, 0, 0.1, s, False)
+    old_w = agent.online_net.layers[0].w.copy()
+    agent.train_step(states[0], 0, 0.1, states[0], False)
+    new_w = agent.online_net.layers[0].w
+    assert not np.allclose(old_w, new_w)
+
+
+def test_dqn_adam_save_load_round_trip(tmp_path):
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, optimizer="adam")
+    for layer in agent.online_net.layers:
+        layer.w[:] = 1.0
+        layer.b[:] = 2.0
+    agent._hard_update_target()
+
+    path = str(tmp_path / "adam_model.npz")
+    agent.save(path)
+
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3, optimizer="adam")
+    agent2.load(path)
+    assert isinstance(agent2.optimizer, Adam)
+
+    for l1, l2 in zip(agent.online_net.layers, agent2.online_net.layers):
+        np.testing.assert_array_equal(l1.w, l2.w)
+        np.testing.assert_array_equal(l1.b, l2.b)
+    for l1, l2 in zip(agent.target_net.layers, agent2.target_net.layers):
+        np.testing.assert_array_equal(l1.w, l2.w)
+        np.testing.assert_array_equal(l1.b, l2.b)
+
+
+def test_dqn_load_old_sgd_checkpoint_without_optimizer_type(tmp_path):
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3)
+    for layer in agent.online_net.layers:
+        layer.w[:] = 1.0
+        layer.b[:] = 2.0
+    agent._hard_update_target()
+
+    path = str(tmp_path / "legacy_model.npz")
+    agent.save(path)
+    data = np.load(path, allow_pickle=False)
+    assert "optimizer_type" in data.files
+
+    legacy_path = str(tmp_path / "legacy_no_opttype.npz")
+    params = {k: data[k] for k in data.files if k != "optimizer_type"}
+    np.savez(legacy_path, **params)
+
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], lr=1e-3)
+    agent2.load(legacy_path)
+    for l1, l2 in zip(agent.online_net.layers, agent2.online_net.layers):
+        np.testing.assert_array_equal(l1.w, l2.w)
+        np.testing.assert_array_equal(l1.b, l2.b)
 
 
 def test_replay_buffer_push_and_len():

@@ -170,6 +170,14 @@ def main(argv=None):
                         help="Decay rate for exponential scheduler, drop factor for step scheduler (default: 0.99)")
     parser.add_argument("--lr-drop-every", type=int, default=100,
                         help="Steps between LR drops for step scheduler (default: 100)")
+    parser.add_argument("--optimizer", choices=["sgd", "adam"], default="sgd",
+                        help="Optimizer type: sgd (default) or adam")
+    parser.add_argument("--adam-beta1", type=float, default=0.9,
+                        help="Adam beta1 (exponential decay rate for first moment), default: 0.9")
+    parser.add_argument("--adam-beta2", type=float, default=0.999,
+                        help="Adam beta2 (exponential decay rate for second moment), default: 0.999")
+    parser.add_argument("--adam-eps", type=float, default=1e-8,
+                        help="Adam epsilon for numerical stability, default: 1e-8")
     parser.add_argument("--eval-freq", type=int, default=0,
                         help="Run evaluation every N training episodes (0 = disabled)")
     parser.add_argument("--eval-episodes", type=int, default=5,
@@ -282,6 +290,9 @@ def main(argv=None):
         n_step=args.n_step,
         seed=args.seed,
         scheduler=scheduler,
+        optimizer=args.optimizer,
+        betas=(args.adam_beta1, args.adam_beta2),
+        eps=args.adam_eps,
     )
 
     scheduler_str = args.lr_scheduler if args.lr_scheduler != "none" else "none"
@@ -294,7 +305,9 @@ def main(argv=None):
         f"dueling_dqn={args.dueling_dqn}, n_step={args.n_step}, "
         f"lr_scheduler={scheduler_str}, observation_mode={args.observation_mode}, "
             f"reward_mode={args.reward_mode}, state_dim={state_dim}, "
-            f"allow_idle_actions={args.allow_idle_actions}"
+            f"allow_idle_actions={args.allow_idle_actions}, "
+            f"optimizer={args.optimizer}, "
+            f"adam_beta1={args.adam_beta1}, adam_beta2={args.adam_beta2}, adam_eps={args.adam_eps}"
     )
 
     _ctx = nullcontext()
