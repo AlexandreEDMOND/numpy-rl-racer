@@ -213,6 +213,95 @@ def _parse_scheduler_args(args=None):
     return parser.parse_args(args)
 
 
+def _parse_optimizer_args(args=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--optimizer", choices=["sgd", "adam"], default="sgd")
+    parser.add_argument("--adam-beta1", type=float, default=0.9)
+    parser.add_argument("--adam-beta2", type=float, default=0.999)
+    parser.add_argument("--adam-eps", type=float, default=1e-8)
+    return parser.parse_args(args)
+
+
+def test_train_optimizer_default_sgd():
+    parsed = _parse_optimizer_args([])
+    assert parsed.optimizer == "sgd"
+    assert parsed.adam_beta1 == 0.9
+    assert parsed.adam_beta2 == 0.999
+    assert parsed.adam_eps == 1e-8
+
+
+def test_train_optimizer_adam_args_parsed():
+    parsed = _parse_optimizer_args([
+        "--optimizer", "adam",
+        "--adam-beta1", "0.8",
+        "--adam-beta2", "0.99",
+        "--adam-eps", "1e-7",
+    ])
+    assert parsed.optimizer == "adam"
+    assert parsed.adam_beta1 == 0.8
+    assert parsed.adam_beta2 == 0.99
+    assert parsed.adam_eps == 1e-7
+
+
+def test_train_optimizer_invalid_rejected():
+    with pytest.raises(SystemExit):
+        _parse_optimizer_args(["--optimizer", "rmsprop"])
+
+
+def test_train_optimizer_adam_runs(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0):
+        main([
+            "--optimizer", "adam",
+            "--episodes", "3",
+            "--max-steps", "10",
+            "--save-dir", str(tmp_path),
+        ])
+    config_path = os.path.join(tmp_path, "config.json")
+    assert os.path.exists(config_path)
+    with open(config_path) as f:
+        cfg = json.load(f)
+    assert cfg["optimizer"] == "adam"
+    assert cfg["adam_beta1"] == 0.9
+    assert cfg["adam_beta2"] == 0.999
+    final_model = os.path.join(tmp_path, "final_model.npz")
+    assert os.path.exists(final_model)
+    best_model = os.path.join(tmp_path, "best_model.npz")
+    assert os.path.exists(best_model)
+    curve = os.path.join(tmp_path, "training_curve.png")
+    assert os.path.exists(curve)
+
+
+def test_train_optimizer_adam_passed_to_agent(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--optimizer", "adam",
+            "--adam-beta1", "0.8",
+            "--adam-beta2", "0.99",
+            "--adam-eps", "1e-7",
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["optimizer"] == "adam"
+    assert kwargs["betas"] == (0.8, 0.99)
+    assert kwargs["eps"] == 1e-7
+
+
 def test_lr_scheduler_default_none():
     parsed = _parse_scheduler_args([])
     assert parsed.lr_scheduler == "none"
