@@ -184,3 +184,62 @@ def test_observation_mode_validation():
 def test_reward_mode_validation():
     with pytest.raises(ValueError, match="reward_mode"):
         RacingEnv(reward_mode="bad")
+
+
+def test_step_info_exposes_off_track_and_collision_false_on_track():
+    env = RacingEnv(randomize_start=False)
+    env.reset(seed=0)
+    _, _, _, info = env.step(np.array([0.0, 1.0]))
+    assert info['off_track'] is False
+    assert info['collision'] is False
+
+
+def test_step_info_off_track_true_when_leaving_track():
+    env = RacingEnv(randomize_start=False)
+    env.reset(seed=0)
+    info_off = None
+    done = False
+    for _ in range(2000):
+        obs, _, done, info = env.step(np.array([0.0, 2.0]))
+        if done:
+            info_off = info
+            break
+    assert info_off is not None, "car never left track"
+    assert info_off['off_track'] is True
+    assert done is True
+    assert info_off['collision'] is False
+
+
+def test_step_info_collision_true_with_obstacle():
+    track = ProceduralTrack(seed=0)
+    sx, sy, _ = track.start_position
+    env = RacingEnv(
+        track=track,
+        obstacles=[Obstacle(float(sx), float(sy), 0.5)],
+        randomize_start=False,
+    )
+    env.reset(seed=42, randomize_start=False)
+    _, _, done, info = env.step(np.array([0.0, 0.0]))
+    assert done is True
+    assert info['collision'] is True
+    assert isinstance(info['off_track'], bool)
+
+
+def test_step_info_preserves_existing_keys():
+    env = RacingEnv(randomize_start=False)
+    env.reset(seed=0)
+    _, _, _, info = env.step(np.array([0.0, 1.0]))
+    for key in ('progress', 'lap_count', 'goal_position', 'elapsed_time',
+                'reward_lines_crossed'):
+        assert key in info
+    assert info['lap_count'] == 0
+    assert info['reward_lines_crossed'] == 0
+    assert info['goal_position'] == env.goal_position
+
+
+def test_step_info_flags_are_python_bool():
+    env = RacingEnv(randomize_start=False)
+    env.reset(seed=0)
+    _, _, _, info = env.step(np.array([0.0, 1.0]))
+    assert type(info['off_track']) is bool
+    assert type(info['collision']) is bool

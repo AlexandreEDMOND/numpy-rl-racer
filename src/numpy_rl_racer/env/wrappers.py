@@ -79,10 +79,16 @@ class EpisodeMonitor:
         if dist_to_edge < self._min_dist_to_edge:
             self._min_dist_to_edge = dist_to_edge
 
-        if dist_to_edge <= 0.05:
+        if 'off_track' in info:
+            if info['off_track']:
+                self._off_track_steps += 1
+        elif dist_to_edge <= 0.05:
             self._off_track_steps += 1
 
-        if self.env.obstacles:
+        if 'collision' in info:
+            if info['collision']:
+                self._obstacle_collisions += 1
+        elif self.env.obstacles:
             x, y = float(obs[0]), float(obs[1])
             if self._check_obstacle_collision(x, y):
                 self._obstacle_collisions += 1
