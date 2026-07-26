@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from numpy_rl_racer.env.racing_env import Obstacle, RacingEnv
-from numpy_rl_racer.env.wrappers import ActionRepeatEnv, EpisodeMonitor
+from numpy_rl_racer.env.wrappers import ActionRepeatEnv, EpisodeMonitor, TrackPoolEnv
 
 
 def test_skip_frames_validation():
@@ -378,3 +378,80 @@ class TestEpisodeMonitor:
         assert monitor.track is env.track
         assert monitor.dt == env.dt
         assert monitor.env is env
+
+
+class TestTrackPoolEnv:
+    def test_track_pool_constructs_multiple_envs(self):
+        wrapper = TrackPoolEnv(track_seeds=[0, 1, 2])
+        assert len(wrapper.envs) == 3
+        for env in wrapper.envs:
+            assert isinstance(env, RacingEnv)
+
+    def test_track_pool_round_robin_cycles(self):
+        wrapper = TrackPoolEnv(track_seeds=[0, 1, 2], mode="round_robin")
+        for _ in range(2):
+            for expected in wrapper.envs:
+                wrapper.reset(seed=42)
+                assert wrapper.env is expected
+
+    def test_track_pool_random_reproducible(self):
+        w1 = TrackPoolEnv(track_seeds=[0, 1, 2, 3], mode="random", seed=7)
+        w2 = TrackPoolEnv(track_seeds=[0, 1, 2, 3], mode="random", seed=7)
+        seq1, seq2 = [], []
+        for _ in range(10):
+            w1.reset(seed=42)
+            w2.reset(seed=42)
+            seq1.append(w1.envs.index(w1.env))
+            seq2.append(w2.envs.index(w2.env))
+        assert seq1 == seq2
+
+    def test_track_pool_reset_returns_observation(self):
+        wrapper = TrackPoolEnv(track_seeds=[0, 1, 2])
+        obs = wrapper.reset(seed=42)
+        assert obs.shape == (wrapper.observation_dim,)
+        assert obs.dtype == np.float64
+
+    def test_track_pool_step_delegates(self):
+        wrapper = TrackPoolEnv(track_seeds=[0, 1, 2])
+        wrapper.reset(seed=42)
+        result = wrapper.step(np.array([0.0, 1.0]))
+        assert isinstance(result, tuple) and len(result) == 4
+        obs, reward, done, info = result
+        assert obs.shape == (wrapper.observation_dim,)
+        assert obs.dtype == np.float64
+        assert isinstance(done, (bool, np.bool_))
+        assert isinstance(reward, (float, np.floating))
+        assert isinstance(info, dict)
+
+    def test_track_pool_getattr_passthrough(self):
+        wrapper = TrackPoolEnv(track_seeds=[0, 1, 2])
+        wrapper.reset(seed=42)
+        assert wrapper.track is wrapper.env.track
+        assert wrapper.observation_dim == wrapper.env.observation_dim
+        assert wrapper.obstacles is wrapper.env.obstacles
+
+    def test_track_pool_empty_seeds_raises(self):
+        with pytest.raises(ValueError, match="track_seeds"):
+            TrackPoolEnv(track_seeds=[])
+
+    def test_track_pool_invalid_mode_raises(self):
+        with pytest.raises(ValueError, match="mode"):
+            TrackPoolEnv(track_seeds=[0, 1], mode="bogus")
+
+    def test_track_pool_obstacles_forwarded(self):
+        obstacles = [Obstacle(0.0, 0.0, 0.5)]
+        wrapper = TrackPoolEnv(track_seeds=[0, 1], obstacles=obstacles)
+        for env in wrapper.envs:
+            assert env.obstacles == obstacles
+        assert wrapper.observation_dim == 8
+
+    def test_track_pool_compatible_with_episode_monitor(self):
+        wrapper = TrackPoolEnv(track_seeds=[0, 1])
+        monitor = EpisodeMonitor(wrapper)
+        monitor.reset(seed=42)
+        info = {}
+        for _ in range(5):
+            obs, reward, done, info = monitor.step(np.array([0.0, 0.5]))
+            assert "episode_monitor/length" in info
+            if done:
+                monitor.reset(seed=42)
