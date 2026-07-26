@@ -79,10 +79,18 @@ def _generate_obstacles(track, num_obstacles, seed=None):
 
 
 def plot_training(episode_rewards, episode_losses, save_dir,
-                  eval_at_episodes=None, eval_reward_means=None, eval_reward_stds=None):
+                  eval_at_episodes=None, eval_reward_means=None, eval_reward_stds=None,
+                  off_track_rates=None, collision_steps=None):
     import matplotlib.pyplot as plt
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+    has_off_track = off_track_rates is not None and len(off_track_rates) > 0
+    n_rows = 3 if has_off_track else 2
+    fig, axes = plt.subplots(n_rows, 1, figsize=(10, 11 if has_off_track else 8))
+    if n_rows == 2:
+        ax1, ax2 = axes
+        ax3 = None
+    else:
+        ax1, ax2, ax3 = axes
 
     ax1.plot(episode_rewards, alpha=0.4, label="Episode Reward", color="blue")
     if len(episode_rewards) >= 20:
@@ -112,6 +120,19 @@ def plot_training(episode_rewards, episode_losses, save_dir,
         ax2.set_title("Training Loss")
         ax2.legend()
         ax2.grid(True, alpha=0.3)
+
+    if ax3 is not None:
+        ax3.plot(np.asarray(off_track_rates), alpha=0.4, label="Off-track Rate", color="red")
+        if len(off_track_rates) >= 20:
+            smoothed_ot = np.convolve(off_track_rates, np.ones(20) / 20, mode="valid")
+            ax3.plot(np.arange(19, len(off_track_rates)), smoothed_ot, "m-", linewidth=2, label="Moving avg (20 ep)")
+        if collision_steps is not None and len(collision_steps) > 0:
+            ax3.plot(np.asarray(collision_steps), alpha=0.6, label="Collision Steps", color="orange")
+        ax3.set_xlabel("Episode")
+        ax3.set_ylabel("Off-track Rate / Collision Steps")
+        ax3.set_title("Off-track Rate / Collisions")
+        ax3.legend(loc="upper left")
+        ax3.grid(True, alpha=0.3)
 
     plt.tight_layout()
     path = os.path.join(save_dir, "training_curve.png")
@@ -314,7 +335,8 @@ def main(argv=None):
     logger = None
     if args.log_dir:
         from numpy_rl_racer.utils.logging import TrainingLogger
-        fieldnames = ["episode", "total_reward", "steps", "avg_loss", "epsilon", "avg_q_value", "elapsed_time"]
+        fieldnames = ["episode", "total_reward", "steps", "avg_loss", "epsilon", "avg_q_value", "elapsed_time",
+                      "off_track_steps", "collision_steps"]
         if args.eval_freq > 0:
             fieldnames.extend(["eval_reward_mean", "eval_reward_std"])
         if args.lr_scheduler != "none":
@@ -325,6 +347,8 @@ def main(argv=None):
 
     episode_rewards = []
     episode_losses = []
+    episode_off_track_rates = []
+    episode_collision_steps = []
     best_reward = -float("inf")
     best_eval_reward = -float("inf")
     eval_at_episodes = []
@@ -340,6 +364,8 @@ def main(argv=None):
             ep_reward = 0.0
             ep_losses = []
             ep_q_vals = []
+            off_track_steps = 0
+            collision_steps = 0
 
             for step in range(args.max_steps):
                 action_idx = _select_action(
@@ -351,6 +377,10 @@ def main(argv=None):
                 next_state, reward, done, info = env.step(ACTIONS[action_idx])
                 loss = agent.train_step(state, action_idx, reward, next_state, done)
                 ep_reward += reward
+                if info.get("off_track"):
+                    off_track_steps += 1
+                if info.get("collision"):
+                    collision_steps += 1
                 if loss > 0:
                     ep_losses.append(loss)
                     ep_q_vals.append(agent._last_avg_q)
@@ -358,27 +388,33 @@ def main(argv=None):
                 if done:
                     break
 
+            steps_taken = step + 1
+            off_track_rate = off_track_steps / steps_taken if steps_taken > 0 else 0.0
             avg_loss = np.mean(ep_losses) if ep_losses else float("nan")
             avg_q = np.mean(ep_q_vals) if ep_q_vals else float("nan")
             episode_rewards.append(ep_reward)
             episode_losses.append(avg_loss)
+            episode_off_track_rates.append(off_track_rate)
+            episode_collision_steps.append(collision_steps)
 
             print(
                 f"ep={ep:4d}/{args.episodes}  "
                 f"reward={ep_reward:7.2f}  "
                 f"loss={avg_loss:.6f}  "
                 f"eps={agent.epsilon:.3f}  "
-                f"steps={step + 1:3d}"
+                f"steps={steps_taken:3d}"
             )
 
             log_kwargs = dict(
                 episode=ep,
                 total_reward=ep_reward,
-                steps=step + 1,
+                steps=steps_taken,
                 avg_loss=avg_loss,
                 epsilon=agent.epsilon,
                 avg_q_value=avg_q,
                 elapsed_time=info.get('elapsed_time', 0.0),
+                off_track_steps=off_track_steps,
+                collision_steps=collision_steps,
             )
             if args.lr_scheduler != "none":
                 log_kwargs["lr"] = agent.optimizer.lr
@@ -424,7 +460,9 @@ def main(argv=None):
     plot_training(episode_rewards, episode_losses, args.save_dir,
                   eval_at_episodes=eval_at_episodes,
                   eval_reward_means=eval_reward_means,
-                  eval_reward_stds=eval_reward_stds)
+                  eval_reward_stds=eval_reward_stds,
+                  off_track_rates=episode_off_track_rates,
+                  collision_steps=episode_collision_steps)
 
 
 if __name__ == "__main__":
