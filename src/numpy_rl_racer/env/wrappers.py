@@ -117,6 +117,49 @@ class EpisodeMonitor:
         return getattr(self.env, name)
 
 
+class TrackPoolEnv:
+    def __init__(self, track_seeds, track_kwargs=None, seed=None, mode="round_robin", **env_kwargs):
+        if not isinstance(track_seeds, (list, tuple)) or len(track_seeds) == 0:
+            raise ValueError("track_seeds must be a non-empty list/tuple of ints")
+        if not all(isinstance(s, (int, np.integer)) and not isinstance(s, bool) for s in track_seeds):
+            raise ValueError("track_seeds must contain only ints")
+        if mode not in ("round_robin", "random"):
+            raise ValueError(f"mode must be 'round_robin' or 'random', got {mode!r}")
+
+        from .racing_env import ProceduralTrack, RacingEnv
+
+        self.track_seeds = list(track_seeds)
+        self.mode = mode
+        self._track_kwargs = dict(track_kwargs) if track_kwargs else {}
+        self._env_kwargs = env_kwargs
+        self._rr_index = 0
+        self.rng = np.random.RandomState(seed)
+
+        envs = []
+        for s in self.track_seeds:
+            track = ProceduralTrack(seed=int(s), **self._track_kwargs)
+            envs.append(RacingEnv(track=track, **self._env_kwargs))
+        self.envs = envs
+        self.env = self.envs[0]
+
+    def reset(self, seed=None):
+        if self.mode == "round_robin":
+            idx = self._rr_index % len(self.envs)
+            self._rr_index += 1
+        else:
+            idx = int(self.rng.randint(len(self.envs)))
+        self.env = self.envs[idx]
+        return self.env.reset(seed=seed)
+
+    def step(self, action):
+        return self.env.step(action)
+
+    def __getattr__(self, name):
+        if name == "env":
+            raise AttributeError(name)
+        return getattr(self.env, name)
+
+
 class ActionRepeatEnv:
     def __init__(self, env, skip_frames=4):
         if skip_frames < 1:
