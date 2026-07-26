@@ -215,3 +215,121 @@ def test_train_script_with_context_manager(tmp_path):
     )
     assert result.returncode == 0, f"stderr: {result.stderr}"
     assert (log_dir / "training_log.csv").exists()
+
+
+def test_train_script_csv_includes_off_track_and_collision_columns(tmp_path):
+    import csv
+    import subprocess
+    import sys
+    scripts_path = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    script_path = os.path.join(scripts_path, "train.py")
+    log_dir = tmp_path / "logs"
+    env = {**os.environ, "MPLBACKEND": "Agg"}
+    result = subprocess.run(
+        [sys.executable, script_path,
+         "--episodes", "2",
+         "--max-steps", "5",
+         "--eval-freq", "0",
+         "--seed", "42",
+         "--log-dir", str(log_dir),
+         "--save-dir", str(tmp_path / "models"),
+         ],
+        capture_output=True, text=True, timeout=60, env=env,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    csv_path = log_dir / "training_log.csv"
+    assert csv_path.exists()
+    with open(csv_path) as f:
+        reader = csv.DictReader(f)
+        headers = reader.fieldnames
+        rows = list(reader)
+    assert "off_track_steps" in headers
+    assert "collision_steps" in headers
+    assert len(rows) == 2
+    for row in rows:
+        ot = int(row["off_track_steps"])
+        col = int(row["collision_steps"])
+        assert ot >= 0
+        assert col >= 0
+
+
+def test_train_script_writes_training_curve_png(tmp_path):
+    import subprocess
+    import sys
+    scripts_path = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    script_path = os.path.join(scripts_path, "train.py")
+    save_dir = tmp_path / "models"
+    env = {**os.environ, "MPLBACKEND": "Agg"}
+    result = subprocess.run(
+        [sys.executable, script_path,
+         "--episodes", "1",
+         "--max-steps", "5",
+         "--eval-freq", "0",
+         "--seed", "42",
+         "--save-dir", str(save_dir),
+         ],
+        capture_output=True, text=True, timeout=60, env=env,
+    )
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    assert (save_dir / "training_curve.png").exists()
+
+
+def test_plot_training_three_axes_with_off_track_and_collision(tmp_path):
+    import importlib.util
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    scripts_path = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    spec = importlib.util.spec_from_file_location(
+        "train", os.path.join(scripts_path, "train.py"))
+    train_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(train_module)
+
+    rewards = [1.0, 2.0, 3.0, 4.0, 5.0]
+    losses = [0.5, 0.4, 0.3, 0.2, 0.1]
+    off_track_rates = [0.1, 0.2, 0.0, 0.3, 0.1]
+    collision_steps = [0, 1, 0, 2, 0]
+
+    captured = {}
+
+    def fake_savefig(path, *args, **kwargs):
+        captured["fig"] = plt.gcf()
+        with open(path, "wb") as f:
+            f.write(b"png")
+
+    original_savefig = plt.savefig
+    plt.savefig = fake_savefig
+    try:
+        train_module.plot_training(
+            rewards, losses, str(tmp_path),
+            off_track_rates=off_track_rates,
+            collision_steps=collision_steps)
+    finally:
+        plt.savefig = original_savefig
+
+    assert "fig" in captured, "plot_training did not call plt.savefig"
+    assert len(captured["fig"].axes) == 3
+    plt.close("all")
+    assert (tmp_path / "training_curve.png").exists()
+
+
+def test_plot_training_backward_compatible(tmp_path):
+    import importlib.util
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    scripts_path = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    spec = importlib.util.spec_from_file_location(
+        "train", os.path.join(scripts_path, "train.py"))
+    train_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(train_module)
+
+    rewards = [1.0, 2.0, 3.0, 4.0, 5.0]
+    losses = [0.5, 0.4, 0.3, 0.2, 0.1]
+
+    train_module.plot_training(rewards, losses, str(tmp_path))
+    plt.close("all")
+
+    assert (tmp_path / "training_curve.png").exists()
