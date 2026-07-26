@@ -340,6 +340,8 @@ class RacingEnv:
             'goal_position': self.goal_position,
             'elapsed_time': self.elapsed_time,
             'reward_lines_crossed': int(np.sum(self._collected_reward_lines)),
+            'off_track': bool(not on_track),
+            'collision': bool(obstacle_collision),
         }
 
         return self._get_observation(), reward, done, info
