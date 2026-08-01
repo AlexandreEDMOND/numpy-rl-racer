@@ -180,6 +180,60 @@ def test_evaluate_mock_6dim(tmp_path):
     assert data["layer_0_w"].shape[0] == 6
 
 
+def test_evaluate_multi_track_seeds_runs(tmp_path):
+    _run_evaluate_main(tmp_path, ["--track-seeds", "0", "1", "--episodes", "1", "--max-steps", "3"])
+    summary = tmp_path / "eval_summary.csv"
+    assert summary.exists()
+
+
+def test_evaluate_summary_csv_one_row_per_seed(tmp_path):
+    _run_evaluate_main(tmp_path, ["--track-seeds", "0", "1", "2", "--episodes", "2"])
+    summary = tmp_path / "eval_summary.csv"
+    assert summary.exists()
+    with open(summary, newline="") as f:
+        reader = csv.DictReader(f)
+        assert set(reader.fieldnames) == {
+            "seed", "episodes", "mean_reward", "std_reward",
+            "mean_steps", "std_steps", "laps_completed_total",
+        }
+        rows = list(reader)
+    assert len(rows) == 3
+    assert [int(r["seed"]) for r in rows] == [0, 1, 2]
+    assert all(int(r["episodes"]) == 2 for r in rows)
+
+
+def test_evaluate_multi_track_seeds_dim_mismatch(tmp_path):
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from evaluate import main
+        model_path = _make_mock_model(tmp_path, state_dim=6)
+        cfg = tmp_path / "config.json"
+        cfg.write_text(json.dumps({"num_obstacles": 3}))
+        args = [
+            "--headless",
+            "--model-path", model_path,
+            "--config", str(cfg),
+            "--track-seeds", "0",
+            "--episodes", "1",
+            "--max-steps", "3",
+            "--save-dir", str(tmp_path),
+        ]
+        with patch("numpy_rl_racer.agent.dqn.DQNAgent.load"):
+            with pytest.raises(ValueError, match="observation_dim"):
+                main(args)
+    finally:
+        sys.path[:] = orig_path
+
+
+def test_evaluate_single_track_unchanged(tmp_path):
+    _run_evaluate_main(tmp_path)
+    saved = list(tmp_path.glob("eval_ep*_final.png"))
+    assert len(saved) == 1
+    assert saved[0].stat().st_size > 0
+
+
 def test_evaluate_mock_8dim(tmp_path):
     model_path = _make_mock_model(tmp_path, state_dim=8)
     data = np.load(model_path)

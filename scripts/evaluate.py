@@ -1,16 +1,27 @@
 import argparse
+import csv
 import json
 import os
 import time
 
 import numpy as np
 
-from numpy_rl_racer.agent import DQNAgent, ACTIONS
+from numpy_rl_racer.agent import ACTIONS, DQNAgent
 from numpy_rl_racer.env import Obstacle, ProceduralTrack, RacingEnv
 from numpy_rl_racer.rendering import MatplotlibRenderer
 
 
 ACCELERATING_ACTIONS = {0, 1, 2}
+
+SUMMARY_COLUMNS = [
+    "seed",
+    "episodes",
+    "mean_reward",
+    "std_reward",
+    "mean_steps",
+    "std_steps",
+    "laps_completed_total",
+]
 
 
 def _infer_state_dim(path):
@@ -49,20 +60,13 @@ def _make_track(config):
     )
 
 
-def _make_env(args, config):
-    track_name = args.track if args.track is not None else config.get("track", "procedural")
-    if track_name != "procedural":
-        raise ValueError(f"Unsupported track {track_name!r}; only 'procedural' is available.")
-    config = dict(config)
-    if args.track_seed is not None:
-        config["track_seed"] = args.track_seed
-    track = _make_track(config)
+def _build_racing_env(config, track):
     num_obstacles = int(config.get("num_obstacles", 0))
     obstacles = None
     if num_obstacles > 0:
         obstacles = _generate_obstacles(track, num_obstacles, config.get("obstacle_seed"))
 
-    env = RacingEnv(
+    return RacingEnv(
         track=track,
         randomize_start=config.get("randomize_start", True),
         time_penalty=config.get("time_penalty", 0.0),
@@ -76,6 +80,17 @@ def _make_env(args, config):
         collision_penalty=config.get("collision_penalty", 5.0),
         step_penalty=config.get("step_penalty", 0.0),
     )
+
+
+def _make_env(args, config):
+    track_name = args.track if args.track is not None else config.get("track", "procedural")
+    if track_name != "procedural":
+        raise ValueError(f"Unsupported track {track_name!r}; only 'procedural' is available.")
+    config = dict(config)
+    if args.track_seed is not None:
+        config["track_seed"] = args.track_seed
+    track = _make_track(config)
+    env = _build_racing_env(config, track)
     return env, track_name
 
 
@@ -88,48 +103,7 @@ def _select_action(agent, state, allow_idle_actions=True):
     return int(allowed[np.argmax(q_values[allowed])])
 
 
-def main(argv=None):
-    parser = argparse.ArgumentParser(description="Evaluate a trained DQN agent in the RacingEnv.")
-    parser.add_argument("--model-path", default="models/best_model.npz", help="Path to saved model parameters")
-    parser.add_argument("--config", default=None,
-                        help="Path to training config JSON. Defaults to config.json next to the model.")
-    parser.add_argument("--episodes", type=int, default=3, help="Number of evaluation episodes")
-    parser.add_argument("--max-steps", type=int, default=200, help="Max steps per episode")
-    parser.add_argument("--save-dir", default="images", help="Directory to save rendered images")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for evaluation")
-    parser.add_argument("--track", choices=["procedural"], default=None,
-                        help="Override track type from config")
-    parser.add_argument("--track-seed", type=int, default=None,
-                        help="Override procedural track seed from config")
-    parser.add_argument("--headless", action="store_true", help="Run in headless mode (no GUI window)")
-    parser.add_argument("--live", action="store_true",
-                        help="Show the rollout in a live Matplotlib window")
-    parser.add_argument("--fps", type=int, default=20, help="Playback FPS in live mode")
-    parser.add_argument("--gif", "--save-gif", action="store_true",
-                        help="Record and save GIF animation of each evaluation episode")
-    parser.add_argument("--mp4", "--save-mp4", action="store_true",
-                        help="Record and save MP4 video of each evaluation episode")
-    parser.add_argument("--record-fps", type=int, default=30,
-                        help="FPS for saved GIF/MP4 recordings")
-    args = parser.parse_args(argv)
-
-    os.makedirs(args.save_dir, exist_ok=True)
-
-    config_path = args.config
-    if config_path is None:
-        candidate = os.path.join(os.path.dirname(args.model_path), "config.json")
-        config_path = candidate if os.path.exists(candidate) else None
-    config = _load_config(config_path) if config_path else {}
-
-    if args.live:
-        args.headless = False
-
-    env, track_name = _make_env(args, config)
-    allow_idle_actions = config.get("allow_idle_actions", True)
-
-    print(f"Track type: {track_name}")
-    print(f"Observation mode: {env.observation_mode}  Reward mode: {env.reward_mode}")
-    print(f"Allow idle actions: {allow_idle_actions}")
+def _load_agent(args):
     data = np.load(args.model_path)
     if "arch_type" in data:
         arch_type = int(data["arch_type"])
@@ -146,24 +120,17 @@ def main(argv=None):
         agent = DQNAgent(state_dim=state_dim)
     agent.load(args.model_path)
     agent.epsilon = 0.0
+    return agent
 
-    if env.observation_dim != agent.state_dim:
-        raise ValueError(
-            f"Model expects state_dim={agent.state_dim}, but evaluation env produces "
-            f"{env.observation_dim}. Use the training config that matches this model."
-        )
 
-    renderer = MatplotlibRenderer(
-        env.track,
-        headless=args.headless,
-        reward_line_progress=getattr(env, "_reward_line_progress", None),
-    )
-
+def _run_episodes(env, agent, args, renderer, allow_idle_actions, n_episodes,
+                  seed_base, file_prefix):
     total_rewards = []
     total_steps = []
+    total_laps = 0
 
-    for ep in range(1, args.episodes + 1):
-        state = env.reset(seed=args.seed + ep)
+    for ep in range(1, n_episodes + 1):
+        state = env.reset(seed=seed_base + ep)
         ep_reward = 0.0
 
         if args.gif or args.mp4:
@@ -192,6 +159,7 @@ def main(argv=None):
 
         total_rewards.append(ep_reward)
         total_steps.append(step + 1)
+        total_laps += int(info.get("lap_count", 0))
         print(f"ep={ep:2d}  reward={ep_reward:7.2f}  steps={step + 1:3d}")
 
         renderer.render(
@@ -203,32 +171,206 @@ def main(argv=None):
             lap_count=info.get("lap_count"),
             reward_lines_crossed=info.get("reward_lines_crossed"),
         )
-        fig_path = os.path.join(args.save_dir, f"eval_ep{ep}_final.png")
+        fig_path = os.path.join(args.save_dir, f"{file_prefix}eval_ep{ep}_final.png")
         renderer.fig.savefig(fig_path, dpi=150)
         print(f"  Saved {fig_path}")
 
         if args.gif:
-            gif_path = os.path.join(args.save_dir, f"eval_ep{ep}.gif")
+            gif_path = os.path.join(args.save_dir, f"{file_prefix}eval_ep{ep}.gif")
             renderer.save_animation(gif_path, fps=args.record_fps)
             print(f"  Saved {gif_path}")
 
         if args.mp4:
-            mp4_path = os.path.join(args.save_dir, f"eval_ep{ep}.mp4")
+            mp4_path = os.path.join(args.save_dir, f"{file_prefix}eval_ep{ep}.mp4")
             renderer.save_video(mp4_path, fps=args.record_fps)
             print(f"  Saved {mp4_path}")
 
         if args.gif or args.mp4:
             renderer.stop_recording()
 
+    return total_rewards, total_steps, total_laps
+
+
+def _write_summary(path, rows):
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=SUMMARY_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
+def _print_summary_table(rows):
+    print("\nPer-seed summary:")
+    header = f"{'seed':>6} {'episodes':>8} {'mean_reward':>12} {'std_reward':>11} " \
+            f"{'mean_steps':>11} {'std_steps':>10} {'laps':>6}"
+    print(header)
+    print("-" * len(header))
+    for row in rows:
+        print(
+            f"{row['seed']:>6} {row['episodes']:>8} "
+            f"{row['mean_reward']:>12.2f} {row['std_reward']:>11.2f} "
+            f"{row['mean_steps']:>11.1f} {row['std_steps']:>10.1f} "
+            f"{row['laps_completed_total']:>6}"
+        )
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Evaluate a trained DQN agent in the RacingEnv.")
+    parser.add_argument("--model-path", default="models/best_model.npz", help="Path to saved model parameters")
+    parser.add_argument("--config", default=None,
+                        help="Path to training config JSON. Defaults to config.json next to the model.")
+    parser.add_argument("--episodes", type=int, default=3, help="Number of evaluation episodes")
+    parser.add_argument("--max-steps", type=int, default=200, help="Max steps per episode")
+    parser.add_argument("--save-dir", default="images", help="Directory to save rendered images")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for evaluation")
+    parser.add_argument("--track", choices=["procedural"], default=None,
+                        help="Override track type from config")
+    parser.add_argument("--track-seed", type=int, default=None,
+                        help="Override procedural track seed from config")
+    parser.add_argument("--track-seeds", type=int, nargs="+", default=None,
+                        help="Evaluate across multiple held-out track seeds "
+                             "(overrides --track-seed when provided)")
+    parser.add_argument("--summary", default=None,
+                        help="Path to per-seed summary CSV. "
+                             "Defaults to <save-dir>/eval_summary.csv.")
+    parser.add_argument("--headless", action="store_true", help="Run in headless mode (no GUI window)")
+    parser.add_argument("--live", action="store_true",
+                        help="Show the rollout in a live Matplotlib window")
+    parser.add_argument("--fps", type=int, default=20, help="Playback FPS in live mode")
+    parser.add_argument("--gif", "--save-gif", action="store_true",
+                        help="Record and save GIF animation of each evaluation episode")
+    parser.add_argument("--mp4", "--save-mp4", action="store_true",
+                        help="Record and save MP4 video of each evaluation episode")
+    parser.add_argument("--record-fps", type=int, default=30,
+                        help="FPS for saved GIF/MP4 recordings")
+    args = parser.parse_args(argv)
+
+    os.makedirs(args.save_dir, exist_ok=True)
+
+    config_path = args.config
+    if config_path is None:
+        candidate = os.path.join(os.path.dirname(args.model_path), "config.json")
+        config_path = candidate if os.path.exists(candidate) else None
+    config = _load_config(config_path) if config_path else {}
+
     if args.live:
-        renderer.show()
-    renderer.close()
+        args.headless = False
+
+    allow_idle_actions = config.get("allow_idle_actions", True)
+
+    agent = _load_agent(args)
+    agent.epsilon = 0.0
+
+    multi_seed = args.track_seeds is not None
+    summary_path = args.summary or os.path.join(args.save_dir, "eval_summary.csv")
+
+    if not multi_seed:
+        env, track_name = _make_env(args, config)
+        print(f"Track type: {track_name}")
+        print(f"Observation mode: {env.observation_mode}  Reward mode: {env.reward_mode}")
+        print(f"Allow idle actions: {allow_idle_actions}")
+
+        if env.observation_dim != agent.state_dim:
+            raise ValueError(
+                f"Model expects state_dim={agent.state_dim}, but evaluation env produces "
+                f"{env.observation_dim}. Use the training config that matches this model."
+            )
+
+        renderer = MatplotlibRenderer(
+            env.track,
+            headless=args.headless,
+            reward_line_progress=getattr(env, "_reward_line_progress", None),
+        )
+
+        total_rewards, total_steps, total_laps = _run_episodes(
+            env, agent, args, renderer, allow_idle_actions,
+            args.episodes, args.seed, "",
+        )
+
+        if args.live:
+            renderer.show()
+        renderer.close()
+
+        print(
+            f"\nEvaluation over {args.episodes} episodes:\n"
+            f"  Average reward: {np.mean(total_rewards):.2f} +/- {np.std(total_rewards):.2f}\n"
+            f"  Average steps:  {np.mean(total_steps):.1f} +/- {np.std(total_steps):.1f}"
+        )
+
+        seed_label = args.track_seed if args.track_seed is not None else config.get("track_seed", 0)
+        _write_summary(summary_path, [{
+            "seed": seed_label,
+            "episodes": args.episodes,
+            "mean_reward": np.mean(total_rewards),
+            "std_reward": np.std(total_rewards),
+            "mean_steps": np.mean(total_steps),
+            "std_steps": np.std(total_steps),
+            "laps_completed_total": total_laps,
+        }])
+        return
+
+    # Multi-seed (held-out tracks) path.
+    print("Track type: procedural (multi-seed)")
+    print(f"Observation mode: {config.get('observation_mode', 'state')}  "
+          f"Reward mode: {config.get('reward_mode', 'legacy')}")
+    print(f"Allow idle actions: {allow_idle_actions}")
+    print(f"Evaluating {len(args.track_seeds)} track seeds: {args.track_seeds}")
+
+    summary_rows = []
+    all_rewards = []
+    all_steps = []
+
+    for seed in args.track_seeds:
+        seed_config = dict(config)
+        seed_config["track_seed"] = seed
+        track = _make_track(seed_config)
+        env = _build_racing_env(seed_config, track)
+
+        if env.observation_dim != agent.state_dim:
+            raise ValueError(
+                f"Model expects state_dim={agent.state_dim}, but track seed {seed} "
+                f"produces observation_dim={env.observation_dim}. "
+                f"Use the training config that matches this model."
+            )
+
+        renderer = MatplotlibRenderer(
+            env.track,
+            headless=args.headless,
+            reward_line_progress=getattr(env, "_reward_line_progress", None),
+        )
+
+        print(f"\n=== Track seed {seed} ===")
+        total_rewards, total_steps, total_laps = _run_episodes(
+            env, agent, args, renderer, allow_idle_actions,
+            args.episodes, args.seed, f"seed{seed}_",
+        )
+
+        if args.live:
+            renderer.show()
+        renderer.close()
+
+        all_rewards.extend(total_rewards)
+        all_steps.extend(total_steps)
+        summary_rows.append({
+            "seed": seed,
+            "episodes": args.episodes,
+            "mean_reward": float(np.mean(total_rewards)),
+            "std_reward": float(np.std(total_rewards)),
+            "mean_steps": float(np.mean(total_steps)),
+            "std_steps": float(np.std(total_steps)),
+            "laps_completed_total": total_laps,
+        })
+
+    _write_summary(summary_path, summary_rows)
+    _print_summary_table(summary_rows)
 
     print(
-        f"\nEvaluation over {args.episodes} episodes:\n"
-        f"  Average reward: {np.mean(total_rewards):.2f} +/- {np.std(total_rewards):.2f}\n"
-        f"  Average steps:  {np.mean(total_steps):.1f} +/- {np.std(total_steps):.1f}"
+        f"\nEvaluation over {len(args.track_seeds)} seeds "
+        f"({len(args.track_seeds) * args.episodes} episodes total):\n"
+        f"  Average reward: {np.mean(all_rewards):.2f} +/- {np.std(all_rewards):.2f}\n"
+        f"  Average steps:  {np.mean(all_steps):.1f} +/- {np.std(all_steps):.1f}"
     )
+    print(f"Summary written to {summary_path}")
 
 
 if __name__ == "__main__":
