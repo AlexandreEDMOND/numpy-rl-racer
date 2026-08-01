@@ -973,6 +973,94 @@ def test_track_seeds_exported_from_env():
     assert TrackPoolEnv is not None
 
 
+# ---------------------------------------------------------------------------
+# Checkpoint snapshots (--checkpoint-freq) tests
+# ---------------------------------------------------------------------------
+
+def test_train_no_checkpoint_freq_by_default(tmp_path):
+    main = _make_main()
+    saved_paths = []
+    real_save = DQNAgent.save
+
+    def tracking_save(self, path):
+        saved_paths.append(path)
+        real_save(self, path)
+
+    with patch.object(DQNAgent, "save", tracking_save), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0):
+        main([
+            "--episodes", "3",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    assert not any("checkpoint_ep" in os.path.basename(p) for p in saved_paths)
+    assert not list(tmp_path.glob("checkpoint_ep*.npz"))
+
+
+def test_train_writes_periodic_checkpoints(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0):
+        main([
+            "--episodes", "4",
+            "--max-steps", "1",
+            "--checkpoint-freq", "2",
+            "--save-dir", str(tmp_path),
+        ])
+    assert (tmp_path / "checkpoint_ep2.npz").exists()
+    assert (tmp_path / "checkpoint_ep4.npz").exists()
+    assert not (tmp_path / "checkpoint_ep1.npz").exists()
+    assert not (tmp_path / "checkpoint_ep3.npz").exists()
+
+
+def test_train_config_records_checkpoint_freq(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "2",
+            "--max-steps", "1",
+            "--checkpoint-freq", "2",
+            "--save-dir", str(tmp_path),
+        ])
+    with open(os.path.join(tmp_path, "config.json")) as f:
+        cfg = json.load(f)
+    assert cfg["checkpoint_freq"] == 2
+
+
+def test_train_checkpoint_freq_round_trips_to_load(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0):
+        main([
+            "--episodes", "2",
+            "--max-steps", "1",
+            "--checkpoint-freq", "2",
+            "--save-dir", str(tmp_path),
+        ])
+    checkpoint = tmp_path / "checkpoint_ep2.npz"
+    assert checkpoint.exists()
+    agent = DQNAgent(state_dim=9, hidden_sizes=[64, 64], seed=0)
+    agent.load(str(checkpoint))  # should not raise
+
+
+def test_train_checkpoint_freq_zero_default_in_config(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    with open(os.path.join(tmp_path, "config.json")) as f:
+        cfg = json.load(f)
+    assert cfg["checkpoint_freq"] == 0
+
+
 def test_train_track_seeds_runs(tmp_path):
     main = _make_main()
     with patch.object(DQNAgent, "act", return_value=0), \

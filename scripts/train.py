@@ -240,6 +240,8 @@ def main(argv=None):
                         help="Number of times to repeat each action (default: 1)")
     parser.add_argument("--allow-idle-actions", action="store_true", default=False,
                         help="Allow coast/brake actions. Default v0 baseline uses accelerating actions only.")
+    parser.add_argument("--checkpoint-freq", type=int, default=0,
+                        help="Save a checkpoint every N training episodes (0 = disabled, default: 0)")
 
     known_args, _ = parser.parse_known_args(argv)
     if known_args.config:
@@ -487,6 +489,13 @@ def main(argv=None):
             if args.eval_freq == 0 and ep_reward > best_reward:
                 best_reward = ep_reward
                 agent.save(os.path.join(args.save_dir, "best_model.npz"))
+
+            if args.checkpoint_freq > 0 and ep % args.checkpoint_freq == 0:
+                checkpoint_path = os.path.join(
+                    args.save_dir, f"checkpoint_ep{ep}.npz"
+                )
+                agent.save(checkpoint_path)
+                print(f"Saved checkpoint to {checkpoint_path}")
 
     agent.save(os.path.join(args.save_dir, "final_model.npz"))
     if args.eval_freq > 0:
