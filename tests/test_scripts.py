@@ -1327,3 +1327,125 @@ def test_grid_search_seed(tmp_path):
     assert len(rows_a) == len(rows_b)
     for ra, rb in zip(rows_a, rows_b):
         assert ra["params"] == rb["params"]
+
+
+# ---------------------------------------------------------------------------
+# Render checkpoints script tests
+# ---------------------------------------------------------------------------
+
+def _make_render_checkpoints():
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        import render_checkpoints
+        return render_checkpoints
+    finally:
+        sys.path[:] = orig_path
+
+
+def _train_with_checkpoints(tmp_path, episodes=2, max_steps=1, freq=2):
+    train_main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0):
+        train_main([
+            "--episodes", str(episodes),
+            "--max-steps", str(max_steps),
+            "--checkpoint-freq", str(freq),
+            "--save-dir", str(tmp_path),
+        ])
+
+
+def test_render_checkpoints_generates_gif(tmp_path):
+    mod = _make_render_checkpoints()
+    _train_with_checkpoints(tmp_path, episodes=2, max_steps=1, freq=2)
+    assert (tmp_path / "checkpoint_ep2.npz").exists()
+
+    mod.main([
+        "--checkpoint-dir", str(tmp_path),
+        "--track-seed", "0",
+        "--save-dir", str(tmp_path),
+        "--max-steps", "2",
+    ])
+    gifs = list(tmp_path.glob("checkpoint_evolution*.gif"))
+    assert len(gifs) == 1
+    assert gifs[0].stat().st_size > 0
+
+
+def test_render_checkpoints_mp4_flag_calls_video_export(tmp_path):
+    mod = _make_render_checkpoints()
+    _train_with_checkpoints(tmp_path, episodes=2, max_steps=1, freq=2)
+    with patch("numpy_rl_racer.rendering.matplotlib_renderer."
+               "MatplotlibRenderer.save_video") as save_video:
+        mod.main([
+            "--checkpoint-dir", str(tmp_path),
+            "--track-seed", "0",
+            "--save-dir", str(tmp_path),
+            "--max-steps", "2",
+            "--mp4",
+            "--record-fps", "24",
+        ])
+    save_video.assert_called_once()
+    assert save_video.call_args.kwargs["fps"] == 24
+
+
+def test_render_checkpoints_explicit_order(tmp_path):
+    mod = _make_render_checkpoints()
+    # Create two real checkpoints with distinct episode numbers.
+    _train_with_checkpoints(tmp_path, episodes=2, max_steps=1, freq=2)
+    _train_with_checkpoints(tmp_path, episodes=4, max_steps=1, freq=4)
+    ep2 = str(tmp_path / "checkpoint_ep2.npz")
+    ep4 = str(tmp_path / "checkpoint_ep4.npz")
+
+    load_order = []
+    real_load = DQNAgent.load
+
+    def tracking_load(self, path):
+        load_order.append(int(os.path.basename(path).split("ep")[1].split(".")[0]))
+        real_load(self, path)
+
+    with patch.object(DQNAgent, "load", tracking_load), \
+         patch.object(DQNAgent, "act", return_value=0):
+        mod.main([
+            "--checkpoints", ep4, ep2,
+            "--track-seed", "0",
+            "--save-dir", str(tmp_path),
+            "--max-steps", "1",
+        ])
+    assert load_order == [4, 2]
+
+
+def test_render_checkpoints_empty_dir_errors(tmp_path):
+    mod = _make_render_checkpoints()
+    with pytest.raises(ValueError, match="No checkpoint files found"):
+        mod.main([
+            "--checkpoint-dir", str(tmp_path),
+            "--track-seed", "0",
+            "--save-dir", str(tmp_path),
+        ])
+
+
+def test_render_checkpoints_sorted_by_episode(tmp_path):
+    mod = _make_render_checkpoints()
+    # Create checkpoint files with non-monotonic episode numbers; use state_dim=6
+    # to match the default eval env (observation_mode="state", no obstacles).
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], seed=0)
+    for ep in (10, 2, 5):
+        agent.save(str(tmp_path / f"checkpoint_ep{ep}.npz"))
+
+    load_order = []
+    real_load = DQNAgent.load
+
+    def tracking_load(self, path):
+        load_order.append(int(os.path.basename(path).split("ep")[1].split(".")[0]))
+        real_load(self, path)
+
+    with patch.object(DQNAgent, "load", tracking_load), \
+         patch.object(DQNAgent, "act", return_value=0):
+        mod.main([
+            "--checkpoint-dir", str(tmp_path),
+            "--track-seed", "0",
+            "--save-dir", str(tmp_path),
+            "--max-steps", "1",
+        ])
+    assert load_order == [2, 5, 10]
