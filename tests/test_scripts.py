@@ -3,6 +3,7 @@ import csv
 import json
 import os
 import sys
+import types
 from unittest.mock import patch
 
 import pytest
@@ -961,6 +962,108 @@ def test_train_skip_frames_with_obstacles(tmp_path):
             "--episodes", "1", "--max-steps", "1",
             "--save-dir", str(tmp_path),
         ])
+
+
+# ---------------------------------------------------------------------------
+# Multi-track pool (--track-seeds) tests
+# ---------------------------------------------------------------------------
+
+def test_track_seeds_exported_from_env():
+    from numpy_rl_racer.env import TrackPoolEnv
+    assert TrackPoolEnv is not None
+
+
+def test_train_track_seeds_runs(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0):
+        main([
+            "--track-seeds", "0", "1", "2",
+            "--episodes", "2",
+            "--max-steps", "2",
+            "--save-dir", str(tmp_path),
+        ])
+    config_path = os.path.join(tmp_path, "config.json")
+    assert os.path.exists(config_path)
+    with open(config_path) as f:
+        cfg = json.load(f)
+    assert cfg["track_seeds"] == [0, 1, 2]
+    assert cfg["track_pool_mode"] == "round_robin"
+    assert os.path.exists(os.path.join(tmp_path, "final_model.npz"))
+
+
+def test_train_track_pool_mode_random_persisted(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--track-seeds", "0", "1",
+            "--track-pool-mode", "random",
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    config_path = os.path.join(tmp_path, "config.json")
+    with open(config_path) as f:
+        cfg = json.load(f)
+    assert cfg["track_pool_mode"] == "random"
+    assert cfg["track_seeds"] == [0, 1]
+
+
+def test_train_track_seeds_dim_mismatch(tmp_path):
+    main = _make_main()
+
+    class _FakePoolEnv:
+        def __init__(self, track_seeds, track_kwargs=None, seed=None,
+                     mode="round_robin", **env_kwargs):
+            self.track_seeds = list(track_seeds)
+            self.mode = mode
+            self.envs = [
+                types.SimpleNamespace(observation_dim=6),
+                types.SimpleNamespace(observation_dim=8),
+                types.SimpleNamespace(observation_dim=6),
+            ]
+
+    with patch("train.TrackPoolEnv", _FakePoolEnv), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        with pytest.raises(ValueError, match="observation_dim"):
+            main([
+                "--track-seeds", "0", "1", "2",
+                "--episodes", "1",
+                "--max-steps", "1",
+                "--save-dir", str(tmp_path),
+            ])
+
+
+def test_train_single_seed_path_unchanged(tmp_path):
+    main = _make_main()
+    env_init_count = []
+    real_init_env = RacingEnv.__init__
+
+    def tracking_env(self, **kwargs):
+        env_init_count.append(kwargs)
+        real_init_env(self, **kwargs)
+
+    with patch.object(RacingEnv, "__init__", tracking_env), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--track-seed", "5",
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    config_path = os.path.join(tmp_path, "config.json")
+    with open(config_path) as f:
+        cfg = json.load(f)
+    assert cfg["track_seed"] == 5
+    assert cfg["track_seeds"] is None
+    assert cfg["track_pool_mode"] == "round_robin"
+    assert len(env_init_count) == 1
 
 
 # ---------------------------------------------------------------------------

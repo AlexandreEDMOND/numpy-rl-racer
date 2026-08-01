@@ -6,7 +6,7 @@ from contextlib import nullcontext
 import numpy as np
 
 from numpy_rl_racer.agent import DQNAgent, ACTIONS
-from numpy_rl_racer.env import Obstacle, ProceduralTrack, RacingEnv
+from numpy_rl_racer.env import Obstacle, ProceduralTrack, RacingEnv, TrackPoolEnv
 from numpy_rl_racer.env.wrappers import ActionRepeatEnv
 from numpy_rl_racer.utils.scheduler import ExponentialDecay, StepDecay
 
@@ -154,6 +154,13 @@ def main(argv=None):
                         help="Track type to use")
     parser.add_argument("--track-seed", type=int, default=0,
                         help="Seed used to generate the procedural track")
+    parser.add_argument("--track-seeds", type=int, nargs="+", default=None,
+                        help="Train across a pool of procedural track seeds "
+                             "(overrides --track-seed when provided)")
+    parser.add_argument("--track-pool-mode", choices=["round_robin", "random"],
+                        default="round_robin",
+                        help="Selection mode for TrackPoolEnv when --track-seeds is "
+                             "provided (default: round_robin)")
     parser.add_argument("--track-radius", type=float, default=6.0,
                         help="Base radius for the procedural track")
     parser.add_argument("--track-points", type=int, default=12,
@@ -252,25 +259,16 @@ def main(argv=None):
         json.dump(resolved, f, indent=2)
     print(f"Saved configuration to {config_out}")
 
-    track = ProceduralTrack(
-        seed=args.track_seed,
+    track_kwargs = dict(
         radius=args.track_radius,
         track_width=2.0,
         num_control_points=args.track_points,
         radial_noise=args.track_variation,
         smoothing_steps=args.track_smoothing,
     )
-
-    obstacles = None
-    if args.num_obstacles > 0:
-        obstacles = _generate_obstacles(track, args.num_obstacles, args.obstacle_seed)
-        print(f"Generated {len(obstacles)} obstacles (seed={args.obstacle_seed})")
-
-    env = RacingEnv(
-        track=track,
+    env_kwargs = dict(
         randomize_start=args.randomize_start,
         time_penalty=args.time_penalty,
-        obstacles=obstacles,
         num_reward_lines=args.num_reward_lines,
         observation_mode=args.observation_mode,
         reward_mode=args.reward_mode,
@@ -280,6 +278,46 @@ def main(argv=None):
         collision_penalty=args.collision_penalty,
         step_penalty=args.step_penalty,
     )
+
+    if args.track_seeds is not None:
+        # Multi-track pool path overrides single-seed training.
+        print(f"Track pool: seeds={list(args.track_seeds)} mode={args.track_pool_mode}")
+
+        obstacles = None
+        if args.num_obstacles > 0:
+            rep_track = ProceduralTrack(seed=int(args.track_seeds[0]), **track_kwargs)
+            obstacles = _generate_obstacles(rep_track, args.num_obstacles, args.obstacle_seed)
+            print(f"Generated {len(obstacles)} obstacles (seed={args.obstacle_seed})")
+
+        pool_env_kwargs = dict(env_kwargs)
+        pool_env_kwargs["obstacles"] = obstacles
+        env = TrackPoolEnv(
+            track_seeds=list(args.track_seeds),
+            track_kwargs=track_kwargs,
+            seed=args.seed,
+            mode=args.track_pool_mode,
+            **pool_env_kwargs,
+        )
+
+        base_dim = env.envs[0].observation_dim
+        for i, sub_env in enumerate(env.envs[1:], start=1):
+            sub_dim = sub_env.observation_dim
+            if sub_dim != base_dim:
+                raise ValueError(
+                    f"Pooled tracks have inconsistent observation_dim: track seed "
+                    f"{args.track_seeds[0]} has observation_dim={base_dim} but track "
+                    f"seed {args.track_seeds[i]} has observation_dim={sub_dim}. "
+                    f"observation_dim must match across pooled tracks."
+                )
+    else:
+        track = ProceduralTrack(seed=args.track_seed, **track_kwargs)
+
+        obstacles = None
+        if args.num_obstacles > 0:
+            obstacles = _generate_obstacles(track, args.num_obstacles, args.obstacle_seed)
+            print(f"Generated {len(obstacles)} obstacles (seed={args.obstacle_seed})")
+
+        env = RacingEnv(track=track, obstacles=obstacles, **env_kwargs)
 
     if args.skip_frames > 1:
         env = ActionRepeatEnv(env, skip_frames=args.skip_frames)
