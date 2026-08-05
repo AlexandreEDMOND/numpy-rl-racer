@@ -974,6 +974,231 @@ def test_track_seeds_exported_from_env():
 
 
 # ---------------------------------------------------------------------------
+# Local ray angles / lidar range configuration tests
+# ---------------------------------------------------------------------------
+
+def test_train_local_ray_angles_passed_to_env(tmp_path):
+    main = _make_main()
+    env_kwargs = []
+    agent_kwargs = []
+    real_init_env = RacingEnv.__init__
+    real_init_agent = DQNAgent.__init__
+
+    def tracking_env(self, **kwargs):
+        env_kwargs.append(kwargs)
+        real_init_env(self, **kwargs)
+
+    def tracking_agent(self, **kwargs):
+        agent_kwargs.append(kwargs)
+        real_init_agent(self, **kwargs)
+
+    with patch.object(RacingEnv, "__init__", tracking_env), \
+         patch.object(DQNAgent, "__init__", tracking_agent), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--local-ray-angles", "-1.5708", "0", "1.5708",
+        ])
+
+    assert "local_ray_angles" in env_kwargs[0]
+    assert len(env_kwargs[0]["local_ray_angles"]) == 3
+    assert agent_kwargs[0]["state_dim"] == 7  # 4 base + 3 rays
+
+
+def test_train_local_ray_angles_default_none_not_passed(tmp_path):
+    main = _make_main()
+    env_kwargs = []
+    real_init_env = RacingEnv.__init__
+
+    def tracking_env(self, **kwargs):
+        env_kwargs.append(kwargs)
+        real_init_env(self, **kwargs)
+
+    with patch.object(RacingEnv, "__init__", tracking_env), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    assert "local_ray_angles" not in env_kwargs[0]
+
+
+def test_train_local_ray_angles_persisted_to_config(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--local-ray-angles", "-1.5708", "-0.7854", "0", "0.7854", "1.5708",
+        ])
+    with open(os.path.join(tmp_path, "config.json")) as f:
+        cfg = json.load(f)
+    assert cfg["local_ray_angles"] == [-1.5708, -0.7854, 0.0, 0.7854, 1.5708]
+
+
+def test_train_local_ray_angles_default_null_in_config(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    with open(os.path.join(tmp_path, "config.json")) as f:
+        cfg = json.load(f)
+    assert cfg["local_ray_angles"] is None
+    assert cfg["lidar_max_range"] is None
+
+
+def test_train_lidar_max_range_passed_and_persisted(tmp_path):
+    main = _make_main()
+    env_kwargs = []
+    real_init_env = RacingEnv.__init__
+
+    def tracking_env(self, **kwargs):
+        env_kwargs.append(kwargs)
+        real_init_env(self, **kwargs)
+
+    with patch.object(RacingEnv, "__init__", tracking_env), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--lidar-max-range", "15.0",
+        ])
+
+    assert env_kwargs[0]["lidar_max_range"] == 15.0
+    with open(os.path.join(tmp_path, "config.json")) as f:
+        cfg = json.load(f)
+    assert cfg["lidar_max_range"] == 15.0
+
+
+def test_train_local_ray_angles_seven_angles_state_dim_eleven(tmp_path):
+    main = _make_main()
+    agent_kwargs = []
+    real_init_agent = DQNAgent.__init__
+
+    def tracking_agent(self, **kwargs):
+        agent_kwargs.append(kwargs)
+        real_init_agent(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_agent), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--local-ray-angles", "-1.5", "-1.0", "-0.5", "0", "0.5", "1.0", "1.5",
+        ])
+
+    assert agent_kwargs[0]["state_dim"] == 11  # 4 base + 7 rays
+
+
+def test_train_track_seeds_forward_ray_angles(tmp_path):
+    main = _make_main()
+    env_kwargs = []
+    real_init_env = RacingEnv.__init__
+
+    def tracking_env(self, **kwargs):
+        env_kwargs.append(kwargs)
+        real_init_env(self, **kwargs)
+
+    with patch.object(RacingEnv, "__init__", tracking_env), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--track-seeds", "0", "1",
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--local-ray-angles", "-1.5708", "0", "1.5708",
+            "--lidar-max-range", "15.0",
+        ])
+
+    assert all("local_ray_angles" in kw for kw in env_kwargs)
+    assert all(len(kw["local_ray_angles"]) == 3 for kw in env_kwargs)
+    assert all(kw["lidar_max_range"] == 15.0 for kw in env_kwargs)
+
+
+def test_evaluate_reads_local_ray_angles_from_config(tmp_path):
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from evaluate import main
+        model_path = _make_mock_model(tmp_path, state_dim=7)
+        cfg = tmp_path / "config.json"
+        cfg.write_text(json.dumps({
+            "observation_mode": "local",
+            "local_ray_angles": [-1.5708, 0.0, 1.5708],
+        }))
+        args = [
+            "--headless",
+            "--model-path", model_path,
+            "--config", str(cfg),
+            "--episodes", "1",
+            "--max-steps", "3",
+            "--save-dir", str(tmp_path),
+        ]
+        with patch("numpy_rl_racer.agent.dqn.DQNAgent.load"):
+            main(args)
+    finally:
+        sys.path[:] = orig_path
+    saved = list(tmp_path.glob("eval_ep*_final.png"))
+    assert len(saved) == 1
+    assert saved[0].stat().st_size > 0
+
+
+def test_evaluate_reads_lidar_max_range_from_config(tmp_path):
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from evaluate import main
+        model_path = _make_mock_model(tmp_path, state_dim=9)
+        cfg = tmp_path / "config.json"
+        cfg.write_text(json.dumps({
+            "observation_mode": "local",
+            "local_ray_angles": [-1.5708, 0.0, 1.5708, 2.0, 3.0],
+            "lidar_max_range": 15.0,
+        }))
+        args = [
+            "--headless",
+            "--model-path", model_path,
+            "--config", str(cfg),
+            "--episodes", "1",
+            "--max-steps", "3",
+            "--save-dir", str(tmp_path),
+        ]
+        with patch("numpy_rl_racer.agent.dqn.DQNAgent.load"):
+            main(args)
+    finally:
+        sys.path[:] = orig_path
+    saved = list(tmp_path.glob("eval_ep*_final.png"))
+    assert len(saved) == 1
+    assert saved[0].stat().st_size > 0
+
+
+# ---------------------------------------------------------------------------
 # Checkpoint snapshots (--checkpoint-freq) tests
 # ---------------------------------------------------------------------------
 
