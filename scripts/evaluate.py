@@ -136,11 +136,13 @@ def _run_episodes(env, agent, args, renderer, allow_idle_actions, n_episodes,
     total_steps = []
     total_laps = 0
 
+    metrics_only = args.metrics_only
+
     for ep in range(1, n_episodes + 1):
         state = env.reset(seed=seed_base + ep)
         ep_reward = 0.0
 
-        if args.gif or args.mp4:
+        if not metrics_only and (args.gif or args.mp4):
             renderer.start_recording()
 
         reward = 0.0
@@ -149,16 +151,17 @@ def _run_episodes(env, agent, args, renderer, allow_idle_actions, n_episodes,
             action_idx = _select_action(agent, state, allow_idle_actions=allow_idle_actions)
             next_state, reward, done, info = env.step(ACTIONS[action_idx])
             ep_reward += reward
-            renderer.render(
-                env.state,
-                step=step,
-                reward=reward,
-                total_reward=ep_reward,
-                obstacles=env.obstacles,
-                lap_count=info.get("lap_count"),
-                reward_lines_crossed=info.get("reward_lines_crossed"),
-            )
-            if args.live and args.fps > 0:
+            if not metrics_only:
+                renderer.render(
+                    env.state,
+                    step=step,
+                    reward=reward,
+                    total_reward=ep_reward,
+                    obstacles=env.obstacles,
+                    lap_count=info.get("lap_count"),
+                    reward_lines_crossed=info.get("reward_lines_crossed"),
+                )
+            if args.live and not metrics_only and args.fps > 0:
                 time.sleep(1.0 / args.fps)
             state = next_state
             if done:
@@ -169,30 +172,31 @@ def _run_episodes(env, agent, args, renderer, allow_idle_actions, n_episodes,
         total_laps += int(info.get("lap_count", 0))
         print(f"ep={ep:2d}  reward={ep_reward:7.2f}  steps={step + 1:3d}")
 
-        renderer.render(
-            env.state,
-            step=step,
-            reward=reward,
-            total_reward=ep_reward,
-            obstacles=env.obstacles,
-            lap_count=info.get("lap_count"),
-            reward_lines_crossed=info.get("reward_lines_crossed"),
-        )
-        fig_path = os.path.join(args.save_dir, f"{file_prefix}eval_ep{ep}_final.png")
-        renderer.fig.savefig(fig_path, dpi=150)
-        print(f"  Saved {fig_path}")
+        if not metrics_only:
+            renderer.render(
+                env.state,
+                step=step,
+                reward=reward,
+                total_reward=ep_reward,
+                obstacles=env.obstacles,
+                lap_count=info.get("lap_count"),
+                reward_lines_crossed=info.get("reward_lines_crossed"),
+            )
+            fig_path = os.path.join(args.save_dir, f"{file_prefix}eval_ep{ep}_final.png")
+            renderer.fig.savefig(fig_path, dpi=150)
+            print(f"  Saved {fig_path}")
 
-        if args.gif:
+        if not metrics_only and args.gif:
             gif_path = os.path.join(args.save_dir, f"{file_prefix}eval_ep{ep}.gif")
             renderer.save_animation(gif_path, fps=args.record_fps)
             print(f"  Saved {gif_path}")
 
-        if args.mp4:
+        if not metrics_only and args.mp4:
             mp4_path = os.path.join(args.save_dir, f"{file_prefix}eval_ep{ep}.mp4")
             renderer.save_video(mp4_path, fps=args.record_fps)
             print(f"  Saved {mp4_path}")
 
-        if args.gif or args.mp4:
+        if not metrics_only and (args.gif or args.mp4):
             renderer.stop_recording()
 
     return total_rewards, total_steps, total_laps
@@ -287,6 +291,11 @@ def main(argv=None):
                         help="Override path for the multi-seed summary plot. "
                              "Defaults to <save-dir>/eval_summary.png.")
     parser.add_argument("--headless", action="store_true", help="Run in headless mode (no GUI window)")
+    parser.add_argument("--metrics-only", action="store_true", default=False,
+                        help="Compute only reward/steps/laps metrics without rendering "
+                             "frames. Implies --headless and disables per-step rendering, "
+                             "per-episode final PNGs, GIF/MP4 recording, and the live "
+                             "window.")
     parser.add_argument("--live", action="store_true",
                         help="Show the rollout in a live Matplotlib window")
     parser.add_argument("--fps", type=int, default=20, help="Playback FPS in live mode")
@@ -297,6 +306,12 @@ def main(argv=None):
     parser.add_argument("--record-fps", type=int, default=30,
                         help="FPS for saved GIF/MP4 recordings")
     args = parser.parse_args(argv)
+
+    if args.metrics_only:
+        args.headless = True
+        args.live = False
+        if args.gif or args.mp4:
+            print("[INFO] --metrics-only set: skipping GIF/MP4 recording")
 
     os.makedirs(args.save_dir, exist_ok=True)
 
@@ -329,20 +344,23 @@ def main(argv=None):
                 f"{env.observation_dim}. Use the training config that matches this model."
             )
 
-        renderer = MatplotlibRenderer(
-            env.track,
-            headless=args.headless,
-            reward_line_progress=getattr(env, "_reward_line_progress", None),
-        )
+        renderer = None
+        if not args.metrics_only:
+            renderer = MatplotlibRenderer(
+                env.track,
+                headless=args.headless,
+                reward_line_progress=getattr(env, "_reward_line_progress", None),
+            )
 
         total_rewards, total_steps, total_laps = _run_episodes(
             env, agent, args, renderer, allow_idle_actions,
             args.episodes, args.seed, "",
         )
 
-        if args.live:
-            renderer.show()
-        renderer.close()
+        if renderer is not None:
+            if args.live:
+                renderer.show()
+            renderer.close()
 
         print(
             f"\nEvaluation over {args.episodes} episodes:\n"
@@ -386,11 +404,13 @@ def main(argv=None):
                 f"Use the training config that matches this model."
             )
 
-        renderer = MatplotlibRenderer(
-            env.track,
-            headless=args.headless,
-            reward_line_progress=getattr(env, "_reward_line_progress", None),
-        )
+        renderer = None
+        if not args.metrics_only:
+            renderer = MatplotlibRenderer(
+                env.track,
+                headless=args.headless,
+                reward_line_progress=getattr(env, "_reward_line_progress", None),
+            )
 
         print(f"\n=== Track seed {seed} ===")
         total_rewards, total_steps, total_laps = _run_episodes(
@@ -398,9 +418,10 @@ def main(argv=None):
             args.episodes, args.seed, f"seed{seed}_",
         )
 
-        if args.live:
-            renderer.show()
-        renderer.close()
+        if renderer is not None:
+            if args.live:
+                renderer.show()
+            renderer.close()
 
         all_rewards.extend(total_rewards)
         all_steps.extend(total_steps)
