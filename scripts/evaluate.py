@@ -221,6 +221,45 @@ def _print_summary_table(rows):
         )
 
 
+def _plot_multi_seed_summary(rows, path):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    seeds = [int(r["seed"]) for r in rows]
+    mean_rewards = [float(r["mean_reward"]) for r in rows]
+    std_rewards = [float(r["std_reward"]) for r in rows]
+    laps = [int(r["laps_completed_total"]) for r in rows]
+
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    x = np.arange(len(seeds))
+
+    ax1.bar(x, mean_rewards, yerr=std_rewards, capsize=4, color="steelblue",
+            alpha=0.85, label="mean reward")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels([str(s) for s in seeds])
+    ax1.set_xlabel("Track seed")
+    ax1.set_ylabel("Mean reward (+/- std)")
+    ax1.set_title("Generalization across held-out track seeds")
+    ax1.grid(True, axis="y", alpha=0.3)
+
+    ax2 = ax1.twinx()
+    ax2.plot(x, laps, "o-", color="darkorange", linewidth=2, markersize=6,
+             label="laps completed")
+    ax2.set_ylabel("Laps completed (total)")
+    ax2.set_ylim(bottom=0)
+
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2, loc="upper left")
+
+    plt.tight_layout()
+    plt.savefig(path, dpi=150)
+    plt.close(fig)
+    print(f"Saved summary plot to {path}")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Evaluate a trained DQN agent in the RacingEnv.")
     parser.add_argument("--model-path", default="models/best_model.npz", help="Path to saved model parameters")
@@ -240,6 +279,13 @@ def main(argv=None):
     parser.add_argument("--summary", default=None,
                         help="Path to per-seed summary CSV. "
                              "Defaults to <save-dir>/eval_summary.csv.")
+    parser.add_argument("--summary-plot", action="store_true", default=False,
+                        help="Write a generalization summary plot "
+                             "(<save-dir>/eval_summary.png by default) for "
+                             "multi-seed evaluation.")
+    parser.add_argument("--summary-plot-path", default=None,
+                        help="Override path for the multi-seed summary plot. "
+                             "Defaults to <save-dir>/eval_summary.png.")
     parser.add_argument("--headless", action="store_true", help="Run in headless mode (no GUI window)")
     parser.add_argument("--live", action="store_true",
                         help="Show the rollout in a live Matplotlib window")
@@ -378,6 +424,10 @@ def main(argv=None):
         f"  Average steps:  {np.mean(all_steps):.1f} +/- {np.std(all_steps):.1f}"
     )
     print(f"Summary written to {summary_path}")
+
+    if args.summary_plot:
+        plot_path = args.summary_plot_path or os.path.join(args.save_dir, "eval_summary.png")
+        _plot_multi_seed_summary(summary_rows, plot_path)
 
 
 if __name__ == "__main__":
