@@ -1565,6 +1565,172 @@ def test_compare_policies_live_mode_skips_gif(tmp_path):
         sys.path[:] = orig_path
 
 
+def _make_compare_policies_main():
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from compare_policies import main
+        return main
+    finally:
+        sys.path[:] = orig_path
+
+
+def _make_compare_policies_module():
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        import compare_policies as cp
+        return cp
+    finally:
+        sys.path[:] = orig_path
+
+
+def test_compare_policies_reads_config_from_model_dir(tmp_path):
+    main = _make_compare_policies_main()
+    model_path = str(tmp_path / "best_model.npz")
+    _make_agent_checkpoint(model_path, state_dim=9)
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"observation_mode": "local"}))
+    main([
+        "--model-path", model_path,
+        "--save-dir", str(tmp_path),
+        "--max-steps", "3",
+    ])
+    gif = tmp_path / "trained_vs_random.gif"
+    assert gif.exists()
+    assert gif.stat().st_size > 0
+
+
+def test_compare_policies_explicit_config_local_mode(tmp_path):
+    main = _make_compare_policies_main()
+    model_path = str(tmp_path / "best_model.npz")
+    _make_agent_checkpoint(model_path, state_dim=9)
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"observation_mode": "local"}))
+    main([
+        "--model-path", model_path,
+        "--config", str(cfg),
+        "--save-dir", str(tmp_path),
+        "--max-steps", "3",
+    ])
+    gif = tmp_path / "trained_vs_random.gif"
+    assert gif.exists()
+    assert gif.stat().st_size > 0
+
+
+def test_compare_policies_state_dim_mismatch_raises(tmp_path):
+    # 6-dim "state-mode" model against a "local-mode" config (obs_dim=9).
+    main = _make_compare_policies_main()
+    model_path = str(tmp_path / "best_model.npz")
+    _make_agent_checkpoint(model_path, state_dim=6)
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"observation_mode": "local"}))
+    with pytest.raises(ValueError, match="observation_dim"):
+        main([
+            "--model-path", model_path,
+            "--config", str(cfg),
+            "--save-dir", str(tmp_path),
+            "--max-steps", "3",
+        ])
+
+
+def test_compare_policies_random_actions_restricted_by_default(tmp_path):
+    cp = _make_compare_policies_module()
+    main = cp.main
+    model_path = str(tmp_path / "best_model.npz")
+    _make_agent_checkpoint(model_path, state_dim=6)
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"allow_idle_actions": False}))
+
+    emitted = []
+    real_factory = cp._random_action_factory
+
+    def recording_factory(rng, allow_idle_actions):
+        inner = real_factory(rng, allow_idle_actions)
+
+        def recorder(state):
+            action_idx = inner(state)
+            emitted.append(int(action_idx))
+            return action_idx
+        return recorder
+
+    with patch.object(cp, "_random_action_factory", recording_factory):
+        main([
+            "--model-path", model_path,
+            "--config", str(cfg),
+            "--save-dir", str(tmp_path),
+            "--max-steps", "8",
+        ])
+    assert emitted, "random policy never sampled an action"
+    assert set(emitted).issubset({0, 1, 2})
+
+
+def test_compare_policies_allow_idle_actions_flag_expands_actions(tmp_path):
+    cp = _make_compare_policies_module()
+    main = cp.main
+    model_path = str(tmp_path / "best_model.npz")
+    _make_agent_checkpoint(model_path, state_dim=6)
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"allow_idle_actions": False}))
+
+    emitted = []
+    real_factory = cp._random_action_factory
+
+    def recording_factory(rng, allow_idle_actions):
+        inner = real_factory(rng, allow_idle_actions)
+
+        def recorder(state):
+            action_idx = inner(state)
+            emitted.append(int(action_idx))
+            return action_idx
+        return recorder
+
+    with patch.object(cp, "_random_action_factory", recording_factory):
+        main([
+            "--model-path", model_path,
+            "--config", str(cfg),
+            "--allow-idle-actions",
+            "--save-dir", str(tmp_path),
+            "--max-steps", "20",
+        ])
+    full_range = set(range(5))
+    assert set(emitted).issubset(full_range)
+    # When idle actions are restored, the random factory samples only via
+    # rng.randint(len(ACTIONS)); seeing {3, 4} is impossible under the
+    # restricted {0, 1, 2}-only branch, so its presence confirms the flag.
+    assert (set(emitted) & {3, 4}), \
+        "expected at least one idle action under --allow-idle-actions"
+
+
+def test_compare_policies_track_seed_overrides_config(tmp_path):
+    cp = _make_compare_policies_module()
+    main = cp.main
+    model_path = str(tmp_path / "best_model.npz")
+    _make_agent_checkpoint(model_path, state_dim=6)
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({"track_seed": 0, "observation_mode": "state"}))
+
+    captured_seeds = []
+    real_make_track = cp._make_track
+
+    def tracking_make_track(config):
+        captured_seeds.append(config.get("track_seed"))
+        return real_make_track(config)
+
+    with patch.object(cp, "_make_track", tracking_make_track):
+        main([
+            "--model-path", model_path,
+            "--config", str(cfg),
+            "--track-seed", "5",
+            "--save-dir", str(tmp_path),
+            "--max-steps", "3",
+        ])
+    assert captured_seeds, "track was never built"
+    assert all(s == 5 for s in captured_seeds)
+
+
 def test_grid_search_seed(tmp_path):
     gs_main = _make_grid_search()
     csv_a = str(tmp_path / "a.csv")

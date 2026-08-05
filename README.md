@@ -46,10 +46,15 @@ Regenerate the comparison GIF:
 ```bash
 uv run python scripts/compare_policies.py \
   --model-path models/best_model.npz \
+  --config models/config.json \
   --save-dir images \
   --track-seed 4 \
   --max-steps 400
 ```
+
+When `--config` is omitted, `compare_policies.py` looks for a `config.json`
+next to `--model-path` (the same lookup `evaluate.py` uses), so the local-mode
+v0 baseline checkpoint replays correctly without extra flags.
 
 ## Observation
 
@@ -133,6 +138,7 @@ uv run python scripts/evaluate.py \
 # Compare a trained policy against a random policy on the same generated track
 uv run python scripts/compare_policies.py \
   --model-path models/best_model.npz \
+  --config models/config.json \
   --save-dir images/tmp \
   --track-seed 4 \
   --max-steps 400

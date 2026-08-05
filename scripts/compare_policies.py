@@ -5,14 +5,18 @@ import os
 
 import numpy as np
 
-from numpy_rl_racer.agent import DQNAgent, ACTIONS
-from numpy_rl_racer.env import ProceduralTrack, RacingEnv
+from numpy_rl_racer.agent import ACTIONS, DQNAgent
 from numpy_rl_racer.rendering import MatplotlibRenderer
 
-
-def _make_env(track_seed):
-    track = ProceduralTrack(seed=track_seed, radius=6.0, track_width=2.0)
-    return RacingEnv(track=track)
+# Reuse the same env-building helpers as evaluate.py so the comparison plays
+# back using the same track/observation/reward configuration as training.
+from evaluate import (
+    ACCELERATING_ACTIONS,
+    _build_racing_env,
+    _load_config,
+    _make_track,
+    _select_action,
+)
 
 
 def _load_agent(model_path):
@@ -32,6 +36,22 @@ def _load_agent(model_path):
     agent.load(model_path)
     agent.epsilon = 0.0
     return agent
+
+
+def _build_envs(config):
+    """Build two envs (trained, random) from the same config/track."""
+    track = _make_track(config)
+    trained_env = _build_racing_env(config, track)
+    random_env = _build_racing_env(config, track)
+    return trained_env, random_env
+
+
+def _random_action_factory(rng, allow_idle_actions):
+    if allow_idle_actions:
+        n_actions = len(ACTIONS)
+        return lambda state: int(rng.randint(n_actions))
+    allowed = np.array(sorted(ACCELERATING_ACTIONS), dtype=np.int64)
+    return lambda state: int(rng.choice(allowed))
 
 
 def _record_episode(env, get_action, max_steps, seed):
@@ -73,22 +93,36 @@ def _record_episode(env, get_action, max_steps, seed):
     return frames
 
 
-def _save_comparison_gif(agent, args):
+def _check_observation_dim(env, agent, label):
+    if env.observation_dim != agent.state_dim:
+        raise ValueError(
+            f"Model expects state_dim={agent.state_dim}, but the {label} env produces "
+            f"observation_dim={env.observation_dim}. Use the training config that "
+            f"matches this model."
+        )
+
+
+def _save_comparison_gif(agent, args, config, allow_idle_actions):
     os.makedirs(args.save_dir, exist_ok=True)
 
-    trained_env = _make_env(args.track_seed)
-    random_env = _make_env(args.track_seed)
+    trained_env, random_env = _build_envs(config)
+    _check_observation_dim(trained_env, agent, "trained-policy")
+    _check_observation_dim(random_env, agent, "random-policy")
     rng = np.random.RandomState(args.random_seed)
+
+    def trained_get_action(s):
+        return _select_action(agent, s, allow_idle_actions=allow_idle_actions)
+    random_get_action = _random_action_factory(rng, allow_idle_actions)
 
     trained_frames = _record_episode(
         trained_env,
-        lambda s: agent.act(s, training=False),
+        trained_get_action,
         args.max_steps,
         args.seed,
     )
     random_frames = _record_episode(
         random_env,
-        lambda s: rng.randint(len(ACTIONS)),
+        random_get_action,
         args.max_steps,
         args.seed,
     )
@@ -130,12 +164,14 @@ def _step_policy(env, state, action_idx, total_reward):
     return next_state, done, info, reward, total_reward + reward
 
 
-def _render_live_comparison(agent, args):
+def _render_live_comparison(agent, args, config, allow_idle_actions):
     import matplotlib.pyplot as plt
 
-    trained_env = _make_env(args.track_seed)
-    random_env = _make_env(args.track_seed)
+    trained_env, random_env = _build_envs(config)
+    _check_observation_dim(trained_env, agent, "trained-policy")
+    _check_observation_dim(random_env, agent, "random-policy")
     rng = np.random.RandomState(args.random_seed)
+    random_get_action = _random_action_factory(rng, allow_idle_actions)
 
     trained_state = trained_env.reset(seed=args.seed)
     random_state = random_env.reset(seed=args.seed)
@@ -166,12 +202,14 @@ def _render_live_comparison(agent, args):
             break
 
         if not trained_done:
-            trained_action = agent.act(trained_state, training=False)
+            trained_action = _select_action(
+                agent, trained_state, allow_idle_actions=allow_idle_actions
+            )
             trained_state, trained_done, trained_info, trained_reward, trained_total = _step_policy(
                 trained_env, trained_state, trained_action, trained_total
             )
         if not random_done:
-            random_action = rng.randint(len(ACTIONS))
+            random_action = random_get_action(random_state)
             random_state, random_done, random_info, random_reward, random_total = _step_policy(
                 random_env, random_state, random_action, random_total
             )
@@ -212,12 +250,29 @@ def main(argv=None):
         description="Compare trained vs random policy with GIF or live visualization"
     )
     parser.add_argument("--model-path", default="models/best_model.npz")
+    parser.add_argument(
+        "--config", default=None,
+        help="Path to training config JSON. Defaults to config.json next to the model.",
+    )
     parser.add_argument("--max-steps", type=int, default=200)
     parser.add_argument("--save-dir", default="images")
-    parser.add_argument("--track-seed", type=int, default=0)
+    parser.add_argument(
+        "--track-seed", type=int, default=None,
+        help="Override procedural track seed from config.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--random-seed", type=int, default=0)
     parser.add_argument("--fps", type=int, default=10)
+    parser.add_argument(
+        "--allow-idle-actions", dest="allow_idle_actions", action="store_true",
+        default=None,
+        help="Restore the full 5-action policy (overrides config). When False the "
+             "policies only use the accelerating subset {0, 1, 2}.",
+    )
+    parser.add_argument(
+        "--no-allow-idle-actions", dest="allow_idle_actions", action="store_false",
+        help="Restrict to accelerating actions {0, 1, 2} (overrides config).",
+    )
     parser.add_argument("--live", action="store_true",
                         help="Open an interactive side-by-side viewer instead of saving a GIF")
     args = parser.parse_args(argv)
@@ -225,11 +280,26 @@ def main(argv=None):
     if args.fps <= 0:
         raise ValueError(f"--fps must be > 0, got {args.fps}")
 
+    config_path = args.config
+    if config_path is None:
+        candidate = os.path.join(os.path.dirname(args.model_path), "config.json")
+        config_path = candidate if os.path.exists(candidate) else None
+    config = _load_config(config_path) if config_path else {}
+    config = dict(config)
+
+    if args.track_seed is not None:
+        config["track_seed"] = args.track_seed
+
+    if args.allow_idle_actions is None:
+        allow_idle_actions = bool(config.get("allow_idle_actions", False))
+    else:
+        allow_idle_actions = args.allow_idle_actions
+
     agent = _load_agent(args.model_path)
     if args.live:
-        _render_live_comparison(agent, args)
+        _render_live_comparison(agent, args, config, allow_idle_actions)
     else:
-        _save_comparison_gif(agent, args)
+        _save_comparison_gif(agent, args, config, allow_idle_actions)
 
 
 if __name__ == "__main__":
