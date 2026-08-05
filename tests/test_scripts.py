@@ -138,6 +138,47 @@ def test_evaluate_headless(tmp_path):
     assert saved[0].stat().st_size > 0
 
 
+def test_evaluate_metrics_only_multi_seed_no_png(tmp_path):
+    _run_evaluate_main(tmp_path, [
+        "--metrics-only", "--track-seeds", "0", "1",
+        "--episodes", "1", "--max-steps", "3",
+    ])
+    assert not list(tmp_path.glob("*eval_ep*_final.png"))
+    assert not list(tmp_path.glob("*.gif"))
+    assert not list(tmp_path.glob("*.mp4"))
+    summary = tmp_path / "eval_summary.csv"
+    assert summary.exists()
+    with open(summary, newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 2
+
+
+def test_evaluate_metrics_only_single_seed_no_png(tmp_path):
+    _run_evaluate_main(tmp_path, [
+        "--metrics-only", "--episodes", "2", "--max-steps", "3",
+    ])
+    assert not list(tmp_path.glob("*eval_ep*_final.png"))
+    assert not list(tmp_path.glob("*.gif"))
+    assert not list(tmp_path.glob("*.mp4"))
+    summary = tmp_path / "eval_summary.csv"
+    assert summary.exists()
+    with open(summary, newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 1
+
+
+def test_evaluate_metrics_only_with_gif_skips_recording(tmp_path, capsys):
+    _run_evaluate_main(tmp_path, [
+        "--metrics-only", "--gif", "--track-seeds", "0",
+        "--episodes", "1", "--max-steps", "3",
+    ])
+    assert not list(tmp_path.glob("*.gif"))
+    assert not list(tmp_path.glob("*.mp4"))
+    assert (tmp_path / "eval_summary.csv").exists()
+    captured = capsys.readouterr()
+    assert "--metrics-only set: skipping GIF/MP4 recording" in captured.out
+
+
 def test_evaluate_gif_flag(tmp_path):
     _run_evaluate_main(tmp_path, ["--gif"])
     gifs = list(tmp_path.glob("eval_ep*.gif"))
