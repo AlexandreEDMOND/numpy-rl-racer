@@ -230,6 +230,11 @@ def main(argv=None):
                         help="Penalty for obstacle collisions in progress reward mode")
     parser.add_argument("--observation-mode", choices=["local", "state"], default="local",
                         help="Observation mode: local uses car-relative ray inputs for the v0 baseline")
+    parser.add_argument("--local-ray-angles", type=float, nargs="*", default=None,
+                        help="Car-relative ray angles in radians (observation_mode=local). "
+                             "Defaults to the RacingEnv default when not supplied.")
+    parser.add_argument("--lidar-max-range", type=float, default=None,
+                        help="Maximum lidar ray range forwarded to RacingEnv (default: env default)")
     parser.add_argument("--num-reward-lines", type=int, default=0,
                         help="Checkpoint reward lines; default 0 for the v0 baseline")
     parser.add_argument("--num-obstacles", type=int, default=0,
@@ -280,6 +285,10 @@ def main(argv=None):
         collision_penalty=args.collision_penalty,
         step_penalty=args.step_penalty,
     )
+    if args.local_ray_angles is not None:
+        env_kwargs["local_ray_angles"] = args.local_ray_angles
+    if args.lidar_max_range is not None:
+        env_kwargs["lidar_max_range"] = args.lidar_max_range
 
     if args.track_seeds is not None:
         # Multi-track pool path overrides single-seed training.

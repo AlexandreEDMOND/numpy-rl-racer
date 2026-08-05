@@ -66,7 +66,7 @@ def _build_racing_env(config, track):
     if num_obstacles > 0:
         obstacles = _generate_obstacles(track, num_obstacles, config.get("obstacle_seed"))
 
-    return RacingEnv(
+    kwargs = dict(
         track=track,
         randomize_start=config.get("randomize_start", True),
         time_penalty=config.get("time_penalty", 0.0),
@@ -80,6 +80,13 @@ def _build_racing_env(config, track):
         collision_penalty=config.get("collision_penalty", 5.0),
         step_penalty=config.get("step_penalty", 0.0),
     )
+    local_ray_angles = config.get("local_ray_angles")
+    if local_ray_angles is not None:
+        kwargs["local_ray_angles"] = local_ray_angles
+    lidar_max_range = config.get("lidar_max_range")
+    if lidar_max_range is not None:
+        kwargs["lidar_max_range"] = lidar_max_range
+    return RacingEnv(**kwargs)
 
 
 def _make_env(args, config):
