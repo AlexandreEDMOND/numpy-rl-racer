@@ -3,6 +3,7 @@ import pytest
 
 from numpy_rl_racer.env.racing_env import Obstacle, RacingEnv
 from numpy_rl_racer.env.wrappers import ActionRepeatEnv, EpisodeMonitor, TrackPoolEnv
+from numpy_rl_racer.env.car import CarState
 
 
 def test_skip_frames_validation():
@@ -128,26 +129,59 @@ def test_compatible_with_obstacles():
     assert obs.dtype == np.float64
 
 
+class _MockTrack:
+    """Mock track exposing the fields EpisodeMonitor reads (track_width, centerline_info)."""
+
+    def __init__(self, track_width, env):
+        self.track_width = track_width
+        self._env = env
+
+    def centerline_info(self, x, y):
+        # Reverse the state-mode observation mapping so the mock's obs[4]
+        # (dist_to_edge_normalized) reproduces the same dist_to_edge values the
+        # old obs-indexing implementation derived.
+        half_tw = float(self.track_width) / 2.0
+        obs = self._env._current_obs
+        dist_to_edge_normalized = float(obs[4])
+        dist_to_centerline = half_tw - dist_to_edge_normalized * half_tw
+        return (np.float64(dist_to_centerline), np.float64(0.0))
+
+
 class _MockEnv:
     """Helper: deterministic mock env for precise stat verification."""
 
     def __init__(self, obs_list, rewards, dones, infos, obstacles=None, track_width=2.0):
-        self.track = type("Track", (), {"track_width": track_width})()
-        self.obstacles = obstacles if obstacles is not None else []
         self._obs_list = obs_list
         self._rewards = rewards
         self._dones = dones
         self._infos = infos
         self._idx = 0
+        self.obstacles = obstacles if obstacles is not None else []
+        self.state = None
+        self._current_obs = None
+        self.track = _MockTrack(track_width, self)
 
     def step(self, action):
         i = self._idx
         self._idx += 1
-        return self._obs_list[i], self._rewards[i], self._dones[i], self._infos[i]
+        obs = self._obs_list[i]
+        self._apply_obs(obs)
+        return obs, self._rewards[i], self._dones[i], self._infos[i]
 
     def reset(self, seed=None):
         self._idx = 0
-        return self._obs_list[0]
+        obs = self._obs_list[0]
+        self._apply_obs(obs)
+        return obs
+
+    def _apply_obs(self, obs):
+        self._current_obs = obs
+        self.state = CarState(
+            x=float(obs[0]),
+            y=float(obs[1]),
+            heading=0.0,
+            velocity=float(obs[3]),
+        )
 
 
 class TestEpisodeMonitor:
@@ -378,6 +412,82 @@ class TestEpisodeMonitor:
         assert monitor.track is env.track
         assert monitor.dt == env.dt
         assert monitor.env is env
+
+    def test_local_mode_avg_and_max_speed_match_state(self):
+        env = RacingEnv(observation_mode="local")
+        monitor = EpisodeMonitor(env)
+        monitor.reset(seed=42)
+        velocities = []
+        for _ in range(10):
+            monitor.step(np.array([0.0, 1.0]))
+            velocities.append(float(env.state.velocity))
+        stats = monitor.get_episode_stats()
+        assert stats["avg_speed"] == pytest.approx(np.mean(velocities))
+        assert stats["max_speed"] == pytest.approx(np.max(velocities))
+
+    def test_local_mode_distance_traveled_matches_state_displacements(self):
+        env = RacingEnv(observation_mode="local")
+        monitor = EpisodeMonitor(env)
+        monitor.reset(seed=42)
+        xs = [float(env.state.x)]
+        ys = [float(env.state.y)]
+        for _ in range(10):
+            monitor.step(np.array([0.0, 1.0]))
+            xs.append(float(env.state.x))
+            ys.append(float(env.state.y))
+        expected = float(np.sum(np.sqrt(np.diff(xs) ** 2 + np.diff(ys) ** 2)))
+        stats = monitor.get_episode_stats()
+        assert stats["distance_traveled"] == pytest.approx(expected)
+
+    def test_local_mode_min_dist_to_edge_matches_centerline(self):
+        env = RacingEnv(observation_mode="local", randomize_start=False)
+        monitor = EpisodeMonitor(env)
+        monitor.reset(seed=42)
+        expected_min = np.inf
+        for _ in range(10):
+            monitor.step(np.array([0.0, 1.0]))
+            dist_to_centerline, _ = env.track.centerline_info(
+                float(env.state.x), float(env.state.y)
+            )
+            half_tw = float(env.track.track_width) / 2.0
+            dist_to_edge = half_tw - float(dist_to_centerline)
+            expected_min = min(expected_min, dist_to_edge)
+        stats = monitor.get_episode_stats()
+        assert stats["min_dist_to_edge"] == pytest.approx(expected_min)
+
+    def test_local_mode_min_dist_to_edge_decreases_toward_edge(self):
+        env = RacingEnv(observation_mode="local", randomize_start=False)
+        monitor = EpisodeMonitor(env)
+        monitor.reset(seed=42)
+        # Steer hard toward one side; the car drifts laterally toward an edge,
+        # so the reported min_dist_to_edge should eventually drop below the
+        # starting value as the episode progresses (it is a running min).
+        prev_min = monitor.get_episode_stats()["min_dist_to_edge"]
+        decreased_at_some_point = False
+        for _ in range(50):
+            monitor.step(np.array([0.5, 1.0]))
+            current_min = monitor.get_episode_stats()["min_dist_to_edge"]
+            if current_min < prev_min:
+                decreased_at_some_point = True
+            prev_min = current_min
+            if env.state is None:
+                break
+        assert decreased_at_some_point
+
+    def test_track_pool_episode_monitor_local_mode_across_resets(self):
+        pool = TrackPoolEnv(track_seeds=[0, 1, 2], observation_mode="local")
+        monitor = EpisodeMonitor(pool)
+        for _ in range(2):
+            monitor.reset(seed=42)
+            for _ in range(5):
+                obs, reward, done, info = monitor.step(np.array([0.0, 1.0]))
+                assert "episode_monitor/length" in info
+                if done:
+                    break
+        stats = monitor.get_episode_stats()
+        assert stats["length"] >= 0
+        assert stats["avg_speed"] >= 0.0
+        assert stats["distance_traveled"] >= 0.0
 
 
 class TestTrackPoolEnv:

@@ -52,10 +52,25 @@ class EpisodeMonitor:
     def get_episode_stats(self):
         return self._compute_stats()
 
+    def _state_position(self):
+        state = self.env.state
+        return float(state.x), float(state.y)
+
+    def _state_velocity(self):
+        return float(self.env.state.velocity)
+
+    def _dist_to_edge(self, x, y):
+        track = self.env.track
+        if hasattr(track, 'centerline_info'):
+            dist_to_centerline, _ = track.centerline_info(x, y)
+            half_tw = float(track.track_width) / 2.0
+            return half_tw - float(dist_to_centerline)
+        return np.inf
+
     def reset(self, seed=None):
         self._reset_stats()
         obs = self.env.reset(seed=seed)
-        self._prev_position = (float(obs[0]), float(obs[1]))
+        self._prev_position = self._state_position()
         self._episode_done = False
         return obs
 
@@ -69,13 +84,13 @@ class EpisodeMonitor:
         self._length += 1
         self._total_reward += float(reward)
 
-        velocity = float(obs[3])
+        velocity = self._state_velocity()
         self._speeds.append(velocity)
         if velocity > self._max_speed:
             self._max_speed = velocity
 
-        half_tw = float(self.env.track.track_width) / 2.0
-        dist_to_edge = float(obs[4]) * half_tw
+        x, y = self._state_position()
+        dist_to_edge = self._dist_to_edge(x, y)
         if dist_to_edge < self._min_dist_to_edge:
             self._min_dist_to_edge = dist_to_edge
 
@@ -89,7 +104,6 @@ class EpisodeMonitor:
             if info['collision']:
                 self._obstacle_collisions += 1
         elif self.env.obstacles:
-            x, y = float(obs[0]), float(obs[1])
             if self._check_obstacle_collision(x, y):
                 self._obstacle_collisions += 1
 
@@ -99,7 +113,6 @@ class EpisodeMonitor:
             self._laps_completed += lap_diff
         self._prev_lap_count = current_laps
 
-        x, y = float(obs[0]), float(obs[1])
         if self._prev_position is not None:
             dx = x - self._prev_position[0]
             dy = y - self._prev_position[1]
