@@ -203,6 +203,50 @@ def test_evaluate_summary_csv_one_row_per_seed(tmp_path):
     assert all(int(r["episodes"]) == 2 for r in rows)
 
 
+def test_evaluate_multi_seed_summary_plot_written(tmp_path):
+    _run_evaluate_main(tmp_path, [
+        "--track-seeds", "0", "1", "2", "--episodes", "2", "--summary-plot",
+    ])
+    plot = tmp_path / "eval_summary.png"
+    assert plot.exists()
+    assert plot.stat().st_size > 0
+    summary = tmp_path / "eval_summary.csv"
+    assert summary.exists()
+    with open(summary, newline="") as f:
+        reader = csv.DictReader(f)
+        assert set(reader.fieldnames) == {
+            "seed", "episodes", "mean_reward", "std_reward",
+            "mean_steps", "std_steps", "laps_completed_total",
+        }
+        rows = list(reader)
+    assert len(rows) == 3
+
+
+def test_evaluate_multi_seed_summary_plot_default_off(tmp_path):
+    _run_evaluate_main(tmp_path, [
+        "--track-seeds", "0", "1", "--episodes", "1",
+    ])
+    plot = tmp_path / "eval_summary.png"
+    assert not plot.exists()
+    assert (tmp_path / "eval_summary.csv").exists()
+
+
+def test_evaluate_multi_seed_summary_plot_headless(tmp_path):
+    _run_evaluate_main(tmp_path, [
+        "--track-seeds", "0", "1", "--episodes", "1",
+        "--summary-plot", "--headless",
+    ])
+    plot = tmp_path / "eval_summary.png"
+    assert plot.exists()
+    assert plot.stat().st_size > 0
+
+
+def test_evaluate_single_seed_no_summary_plot(tmp_path):
+    _run_evaluate_main(tmp_path, ["--summary-plot"])
+    plot = tmp_path / "eval_summary.png"
+    assert not plot.exists()
+
+
 def test_evaluate_multi_track_seeds_dim_mismatch(tmp_path):
     scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
     orig_path = sys.path.copy()
