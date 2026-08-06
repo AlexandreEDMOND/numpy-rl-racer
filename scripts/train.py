@@ -225,6 +225,14 @@ def main(argv=None):
                         help=argparse.SUPPRESS)
     parser.add_argument("--use-per", action="store_true",
                         help="Enable Prioritized Experience Replay")
+    parser.add_argument("--per-alpha", type=float, default=0.6,
+                        help="Prioritized Replay priority exponent (default: 0.6)")
+    parser.add_argument("--per-beta0", type=float, default=0.4,
+                        help="Initial Prioritized Replay importance-sampling exponent "
+                             "(default: 0.4)")
+    parser.add_argument("--per-beta-anneal-steps", type=int, default=100000,
+                        help="Steps to anneal Prioritized Replay beta from beta0 to 1.0 "
+                             "(default: 100000)")
     parser.add_argument("--dueling-dqn", action="store_true",
                         help="Enable Dueling DQN architecture")
     parser.add_argument("--noisy-net", action="store_true", default=False,
@@ -402,6 +410,9 @@ def main(argv=None):
         target_update_freq=args.target_update_freq,
         use_double_dqn=args.double_dqn,
         use_per=args.use_per,
+        alpha=args.per_alpha,
+        beta0=args.per_beta0,
+        beta_anneal_steps=args.per_beta_anneal_steps,
         use_dueling_dqn=args.dueling_dqn,
         use_noisy=args.noisy_net,
         n_step=args.n_step,
