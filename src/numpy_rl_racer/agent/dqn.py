@@ -148,7 +148,8 @@ class DQNAgent:
                  beta_anneal_steps=100000, tau=0.0, seed=None,
                  use_dueling_dqn=False, use_noisy=False, n_step=1, scheduler=None,
                  momentum=0.0, weight_decay=0.0, max_grad_norm=None,
-                 optimizer="sgd", betas=(0.9, 0.999), eps=1e-8):
+                 optimizer="sgd", betas=(0.9, 0.999), eps=1e-8,
+                 loss_type="mse", huber_delta=1.0):
         if hidden_sizes is None:
             hidden_sizes = [64, 64]
         self.state_dim = state_dim
@@ -176,6 +177,10 @@ class DQNAgent:
         if optimizer not in ("sgd", "adam"):
             raise ValueError(
                 f"Unknown optimizer {optimizer!r}; expected 'sgd' or 'adam'"
+            )
+        if loss_type not in ("mse", "huber"):
+            raise ValueError(
+                f"Unknown loss_type {loss_type!r}; expected 'mse' or 'huber'"
             )
         if optimizer == "adam":
             self.optimizer = Adam(
@@ -208,6 +213,8 @@ class DQNAgent:
         self.use_dueling_dqn = use_dueling_dqn
         self.use_noisy = use_noisy
         self.tau = tau
+        self.loss_type = loss_type
+        self.huber_delta = huber_delta
         self._step_counter = 0
         self._last_avg_q = float("nan")
 
@@ -282,6 +289,8 @@ class DQNAgent:
         params["state_dim"] = np.array(self.state_dim)
         params["n_actions"] = np.array(N_ACTIONS)
         params["use_noisy"] = np.array(1 if self.use_noisy else 0)
+        params["loss_type"] = np.array(self.loss_type)
+        params["huber_delta"] = np.array(self.huber_delta)
         np.savez(path, **params)
 
     def load(self, path):
@@ -426,6 +435,9 @@ class DQNAgent:
                 ))
             buf.pos = int(data["buffer_pos"])
 
+        self.loss_type = str(data["loss_type"]) if "loss_type" in data.files else "mse"
+        self.huber_delta = float(data["huber_delta"]) if "huber_delta" in data.files else 1.0
+
     def _replace_output_layers_with_noisy(self, hidden_sizes, use_dueling_dqn):
         for net in [self.online_net, self.target_net]:
             if use_dueling_dqn:
@@ -511,7 +523,30 @@ class DQNAgent:
         self._last_avg_q = float(np.mean(np.max(current_q, axis=1)))
         q_sa = current_q[np.arange(self.batch_size), actions]
 
-        if self.use_per:
+        td = q_sa - target_q
+        if self.loss_type == "huber":
+            abs_td = np.abs(td)
+            per_element_loss = np.where(
+                abs_td <= self.huber_delta,
+                0.5 * td * td,
+                self.huber_delta * (abs_td - 0.5 * self.huber_delta),
+            )
+            huber_grad = np.where(
+                abs_td <= self.huber_delta,
+                td,
+                self.huber_delta * np.sign(td),
+            )
+            if self.use_per:
+                loss = np.mean(is_weights * per_element_loss)
+                grad_q = np.zeros_like(current_q)
+                grad_q[np.arange(self.batch_size), actions] = \
+                    is_weights * huber_grad / self.batch_size
+            else:
+                loss = np.mean(per_element_loss)
+                grad_q = np.zeros_like(current_q)
+                grad_q[np.arange(self.batch_size), actions] = \
+                    huber_grad / self.batch_size
+        elif self.use_per:
             loss = np.mean(is_weights * (target_q - q_sa) ** 2)
             grad_q = np.zeros_like(current_q)
             grad_q[np.arange(self.batch_size), actions] = \

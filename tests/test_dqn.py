@@ -976,3 +976,201 @@ def test_n_step_training_loss_decreases():
             losses.append(loss)
     if len(losses) >= 40:
         assert np.mean(losses[-20:]) < np.mean(losses[:20])
+
+
+# -- Huber (smooth-L1) loss tests ------------------------------------------
+
+
+def _fake_train_step(agent, monkeypatch, current_q, actions, rewards=None,
+                     dones=None, is_weights=None, next_q_target=None):
+    """Drive a fake batch through ``train_step`` with fixed network outputs.
+
+    Monkeypatches ``online_net.forward``/``target_net.forward`` to return fixed
+    arrays, ``online_net.backward`` to capture the upstream gradient, and
+    ``optimizer.step`` to a no-op so no weights change. Returns
+    ``(loss, grad_at_actions)``.
+    """
+    batch_size = agent.batch_size
+    states = np.zeros((batch_size, agent.state_dim))
+    next_states = np.zeros((batch_size, agent.state_dim))
+    if rewards is None:
+        rewards = np.zeros(batch_size)
+    if dones is None:
+        dones = np.ones(batch_size, dtype=bool)
+    if next_q_target is None:
+        next_q_target = np.zeros((batch_size, N_ACTIONS))
+    if is_weights is None:
+        is_weights = np.ones(batch_size)
+
+    for _ in range(batch_size):
+        agent.replay_buffer.push(states[0], 0, 0.0, states[0], False)
+
+    captured = {}
+
+    def fake_online_forward(x):
+        return current_q
+
+    def fake_target_forward(x):
+        return next_q_target
+
+    monkeypatch.setattr(agent.online_net, "forward", fake_online_forward)
+    monkeypatch.setattr(agent.target_net, "forward", fake_target_forward)
+    monkeypatch.setattr(
+        agent.online_net, "backward", lambda g: captured.setdefault("grad_q", g)
+    )
+    monkeypatch.setattr(agent.optimizer, "step", lambda: None)
+
+    if agent.use_per:
+        def fake_sample(n):
+            return (states, actions, rewards, next_states, dones,
+                    is_weights, np.zeros(n, dtype=np.int64))
+
+        monkeypatch.setattr(agent.replay_buffer, "sample", fake_sample)
+        monkeypatch.setattr(agent.replay_buffer, "update_priorities",
+                            lambda idx, td: None)
+    else:
+        def fake_sample(n):
+            return states, actions, rewards, next_states, dones
+
+        monkeypatch.setattr(agent.replay_buffer, "sample", fake_sample)
+
+    loss = agent.train_step(
+        states[0], int(actions[0]), float(rewards[0]), next_states[0], bool(dones[0])
+    )
+    grad_at_actions = captured["grad_q"][np.arange(batch_size), actions]
+    return loss, grad_at_actions
+
+
+def _make_huber_agent(**overrides):
+    kwargs = dict(
+        state_dim=1, hidden_sizes=[1], lr=0.0, batch_size=4,
+        buffer_size=4, use_double_dqn=False, seed=0,
+    )
+    kwargs.update(overrides)
+    return DQNAgent(**kwargs)
+
+
+def _huber_current_q():
+    """current_q with q_sa spanning both |td|<=delta and |td|>delta regimes."""
+    current_q = np.zeros((4, N_ACTIONS))
+    current_q[0, 0] = 0.5
+    current_q[1, 1] = -0.5
+    current_q[2, 2] = 2.0
+    current_q[3, 3] = -2.0
+    return current_q
+
+
+def test_huber_loss_value_matches_formula(monkeypatch):
+    agent = _make_huber_agent(loss_type="huber", huber_delta=1.0)
+    actions = np.array([0, 1, 2, 3])
+    current_q = _huber_current_q()
+    # dones=True, rewards=0 -> target_q=0, td = q_sa = [0.5, -0.5, 2.0, -2.0]
+    loss, _ = _fake_train_step(agent, monkeypatch, current_q, actions,
+                               dones=np.ones(4, dtype=bool),
+                               rewards=np.zeros(4))
+
+    td = np.array([0.5, -0.5, 2.0, -2.0])
+    delta = 1.0
+    abs_td = np.abs(td)
+    per_element = np.where(abs_td <= delta, 0.5 * td * td,
+                          delta * (abs_td - 0.5 * delta))
+    expected_loss = float(np.mean(per_element))
+    assert np.isclose(loss, expected_loss, rtol=1e-12), (loss, expected_loss)
+    # Sanity: both regimes are exercised.
+    assert np.any(abs_td <= delta) and np.any(abs_td > delta)
+
+
+def test_huber_gradient_bounded_by_delta(monkeypatch):
+    agent = _make_huber_agent(loss_type="huber", huber_delta=1.0)
+    actions = np.array([0, 1, 2, 3])
+    current_q = _huber_current_q()
+    _, grad_at_actions = _fake_train_step(agent, monkeypatch, current_q, actions,
+                                          dones=np.ones(4, dtype=bool),
+                                          rewards=np.zeros(4))
+    batch_size = agent.batch_size
+    bound = agent.huber_delta / batch_size
+    assert np.all(np.abs(grad_at_actions) <= bound + 1e-12), (
+        grad_at_actions, bound
+    )
+    expected = np.array([0.5, -0.5, 1.0, -1.0]) / batch_size
+    np.testing.assert_allclose(grad_at_actions, expected, rtol=1e-12)
+    # Gradient sign matches (q_sa - target_q) = td (ascent direction).
+    td = np.array([0.5, -0.5, 2.0, -2.0])
+    assert np.all(np.sign(grad_at_actions) == np.sign(td))
+
+
+def test_huber_with_per_uses_is_weights(monkeypatch):
+    agent = _make_huber_agent(loss_type="huber", huber_delta=1.0, use_per=True)
+    actions = np.array([0, 1, 2, 3])
+    current_q = _huber_current_q()
+    is_weights = np.array([0.5, 0.5, 1.0, 1.0])
+    loss, grad_at_actions = _fake_train_step(
+        agent, monkeypatch, current_q, actions,
+        dones=np.ones(4, dtype=bool), rewards=np.zeros(4),
+        is_weights=is_weights,
+    )
+    td = np.array([0.5, -0.5, 2.0, -2.0])
+    delta = 1.0
+    abs_td = np.abs(td)
+    per_element = np.where(abs_td <= delta, 0.5 * td * td,
+                          delta * (abs_td - 0.5 * delta))
+    huber_grad = np.where(abs_td <= delta, td, delta * np.sign(td))
+    batch_size = agent.batch_size
+    expected_loss = float(np.mean(is_weights * per_element))
+    expected_grad = is_weights * huber_grad / batch_size
+    assert np.isclose(loss, expected_loss, rtol=1e-12), (loss, expected_loss)
+    np.testing.assert_allclose(grad_at_actions, expected_grad, rtol=1e-12)
+
+
+def test_mse_path_unchanged_by_huber_option(monkeypatch):
+    actions = np.array([0, 1, 2, 3])
+    current_q = _huber_current_q()
+    agent_default = _make_huber_agent()
+    agent_explicit = _make_huber_agent(loss_type="mse")
+    assert agent_default.loss_type == "mse"
+    assert agent_explicit.loss_type == "mse"
+
+    loss_d, grad_d = _fake_train_step(
+        agent_default, monkeypatch, current_q, actions,
+        dones=np.ones(4, dtype=bool), rewards=np.zeros(4))
+    loss_e, grad_e = _fake_train_step(
+        agent_explicit, monkeypatch, current_q, actions,
+        dones=np.ones(4, dtype=bool), rewards=np.zeros(4))
+
+    td = np.array([0.5, -0.5, 2.0, -2.0])
+    expected_loss = float(np.mean(td ** 2))
+    expected_grad = 2.0 * td / 4
+    assert np.isclose(loss_d, expected_loss, rtol=1e-12)
+    assert np.isclose(loss_e, expected_loss, rtol=1e-12)
+    np.testing.assert_array_equal(grad_d, grad_e)
+    np.testing.assert_allclose(grad_d, expected_grad, rtol=1e-12)
+
+
+def test_dqn_invalid_loss_type_raises():
+    with pytest.raises(ValueError):
+        DQNAgent(state_dim=6, hidden_sizes=[16], loss_type="rmse")
+
+
+def test_save_load_preserves_loss_type(tmp_path):
+    agent = _make_huber_agent(loss_type="huber", huber_delta=0.5)
+    path = str(tmp_path / "huber_model.npz")
+    agent.save(path)
+
+    loaded = _make_huber_agent()
+    assert loaded.loss_type == "mse"
+    assert loaded.huber_delta == 1.0
+    loaded.load(path)
+    assert loaded.loss_type == "huber"
+    assert np.isclose(loaded.huber_delta, 0.5)
+
+    # Legacy checkpoint without the new keys defaults to mse / 1.0.
+    data = np.load(path, allow_pickle=False)
+    legacy_path = str(tmp_path / "legacy_no_loss.npz")
+    params = {k: data[k] for k in data.files
+              if k not in ("loss_type", "huber_delta")}
+    np.savez(legacy_path, **params)
+
+    legacy = _make_huber_agent(loss_type="huber", huber_delta=0.5)
+    legacy.load(legacy_path)
+    assert legacy.loss_type == "mse"
+    assert np.isclose(legacy.huber_delta, 1.0)

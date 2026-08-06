@@ -9,6 +9,17 @@ def mse_loss(pred, target):
     return np.mean((pred - target) ** 2)
 
 
+def huber_loss(pred, target, delta=1.0):
+    e = pred - target
+    abs_e = np.abs(e)
+    per_element = np.where(
+        abs_e <= delta,
+        0.5 * e * e,
+        delta * (abs_e - 0.5 * delta),
+    )
+    return np.mean(per_element)
+
+
 class Dense:
     def __init__(self, in_features, out_features, weight_decay=0.0):
         self.w = np.random.randn(in_features, out_features) * np.sqrt(2.0 / in_features)
