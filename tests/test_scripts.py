@@ -1566,6 +1566,89 @@ def test_train_single_seed_path_unchanged(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Gradient clipping (--max-grad-norm) tests
+# ---------------------------------------------------------------------------
+
+def test_train_max_grad_norm_persisted_to_config(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--max-grad-norm", "1.0",
+        ])
+    with open(os.path.join(tmp_path, "config.json")) as f:
+        cfg = json.load(f)
+    assert cfg["max_grad_norm"] == 1.0
+
+
+def test_train_max_grad_norm_default_null_in_config(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    with open(os.path.join(tmp_path, "config.json")) as f:
+        cfg = json.load(f)
+    assert "max_grad_norm" in cfg
+    assert cfg["max_grad_norm"] is None
+
+
+def test_train_max_grad_norm_passed_to_agent(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--max-grad-norm", "1.0",
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["max_grad_norm"] == 1.0
+
+
+def test_train_max_grad_norm_default_none_passed_to_agent(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["max_grad_norm"] is None
+
+
+# ---------------------------------------------------------------------------
 # Grid search tests
 # ---------------------------------------------------------------------------
 
