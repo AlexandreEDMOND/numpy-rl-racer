@@ -898,6 +898,67 @@ def test_dqn_noisy_net_save_load(tmp_path):
             np.testing.assert_array_equal(l1.sigma_b, l2.sigma_b)
 
 
+def test_dqn_save_persists_use_noisy_metadata(tmp_path):
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], use_noisy=True)
+    path = str(tmp_path / "noisy_meta.npz")
+    agent.save(path)
+    data = np.load(path, allow_pickle=False)
+    assert "use_noisy" in data.files
+    assert int(data["use_noisy"]) == 1
+
+
+def test_dqn_load_reconstructs_use_noisy_from_metadata(tmp_path):
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], use_noisy=True)
+    path = str(tmp_path / "noisy_meta.npz")
+    agent.save(path)
+
+    data = np.load(path, allow_pickle=False)
+    use_noisy = int(data["use_noisy"]) if "use_noisy" in data.files else 0
+    reconstructed = DQNAgent(
+        state_dim=int(data["state_dim"]),
+        hidden_sizes=list(data["hidden_sizes"]),
+        use_dueling_dqn=(int(data["arch_type"]) == 1),
+        use_noisy=(use_noisy == 1),
+    )
+    reconstructed.load(path)
+    assert reconstructed.use_noisy is True
+    assert any(isinstance(layer, NoisyLinear)
+               for layer in reconstructed.online_net.layers)
+
+
+def test_dqn_load_validates_use_noisy_mismatch(tmp_path):
+    noisy_agent = DQNAgent(state_dim=6, hidden_sizes=[16], use_noisy=True)
+    noisy_path = str(tmp_path / "noisy.npz")
+    noisy_agent.save(noisy_path)
+
+    plain_agent = DQNAgent(state_dim=6, hidden_sizes=[16], use_noisy=False)
+    with pytest.raises(ValueError, match="use_noisy"):
+        plain_agent.load(noisy_path)
+
+    plain_agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], use_noisy=False)
+    plain_path = str(tmp_path / "plain.npz")
+    plain_agent2.save(plain_path)
+
+    noisy_agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], use_noisy=True)
+    with pytest.raises(ValueError, match="use_noisy"):
+        noisy_agent2.load(plain_path)
+
+
+def test_dqn_load_legacy_checkpoint_without_use_noisy(tmp_path):
+    agent = DQNAgent(state_dim=6, hidden_sizes=[16], use_noisy=False)
+    path = str(tmp_path / "legacy_no_noisy.npz")
+    agent.save(path)
+
+    data = np.load(path, allow_pickle=False)
+    legacy_path = str(tmp_path / "legacy_no_noisy_key.npz")
+    params = {k: data[k] for k in data.files if k != "use_noisy"}
+    np.savez(legacy_path, **params)
+
+    agent2 = DQNAgent(state_dim=6, hidden_sizes=[16], use_noisy=False)
+    agent2.load(legacy_path)
+    assert agent2.use_noisy is False
+
+
 def test_n_step_training_loss_decreases():
     """Loss decreases over multiple training steps with n=3."""
     np.random.seed(2)

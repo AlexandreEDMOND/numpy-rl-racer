@@ -227,6 +227,8 @@ def main(argv=None):
                         help="Enable Prioritized Experience Replay")
     parser.add_argument("--dueling-dqn", action="store_true",
                         help="Enable Dueling DQN architecture")
+    parser.add_argument("--noisy-net", action="store_true", default=False,
+                        help="Enable NoisyNet exploration (replaces output layers with NoisyLinear)")
     parser.add_argument("--n-step", type=int, default=1,
                         help="N-step returns for TD target (default: 1)")
     parser.add_argument("--lr-scheduler", choices=["none", "exponential", "step"],
@@ -394,6 +396,7 @@ def main(argv=None):
         use_double_dqn=args.double_dqn,
         use_per=args.use_per,
         use_dueling_dqn=args.dueling_dqn,
+        use_noisy=args.noisy_net,
         n_step=args.n_step,
         seed=args.seed,
         scheduler=scheduler,
@@ -409,7 +412,7 @@ def main(argv=None):
         f"epsilon_start={args.epsilon_start}, epsilon_min={args.epsilon_min}, "
         f"epsilon_decay={args.epsilon_decay}, target_update_freq={args.target_update_freq}, "
         f"double_dqn={args.double_dqn}, use_per={args.use_per}, "
-        f"dueling_dqn={args.dueling_dqn}, n_step={args.n_step}, "
+        f"dueling_dqn={args.dueling_dqn}, noisy_net={args.noisy_net}, n_step={args.n_step}, "
         f"lr_scheduler={scheduler_str}, observation_mode={args.observation_mode}, "
             f"reward_mode={args.reward_mode}, state_dim={state_dim}, "
             f"allow_idle_actions={args.allow_idle_actions}, "

@@ -116,10 +116,12 @@ def _load_agent(args):
         arch_type = int(data["arch_type"])
         hidden_sizes = list(data["hidden_sizes"])
         state_dim = int(data["state_dim"])
+        use_noisy = int(data["use_noisy"]) if "use_noisy" in data.files else 0
         agent = DQNAgent(
             state_dim=state_dim,
             hidden_sizes=hidden_sizes,
             use_dueling_dqn=(arch_type == 1),
+            use_noisy=(use_noisy == 1),
         )
     else:
         print("[WARNING] No architecture metadata in checkpoint — assuming MLP architecture.")

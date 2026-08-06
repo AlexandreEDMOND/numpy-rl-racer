@@ -2026,3 +2026,79 @@ def test_render_checkpoints_sorted_by_episode(tmp_path):
             "--max-steps", "1",
         ])
     assert load_order == [2, 5, 10]
+
+
+# ---------------------------------------------------------------------------
+# NoisyNet (--noisy-net) tests
+# ---------------------------------------------------------------------------
+
+
+def test_train_noisy_net_flag_sets_use_noisy(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--noisy-net",
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    assert captured[0]["use_noisy"] is True
+
+    config_path = os.path.join(tmp_path, "config.json")
+    assert os.path.exists(config_path)
+    with open(config_path) as f:
+        cfg = json.load(f)
+    assert cfg["noisy_net"] is True
+
+
+def test_train_default_no_noisy_net(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    assert captured[0]["use_noisy"] is False
+    with open(os.path.join(tmp_path, "config.json")) as f:
+        cfg = json.load(f)
+    assert cfg["noisy_net"] is False
+
+
+def test_evaluate_loads_noisy_checkpoint(tmp_path):
+    scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+    orig_path = sys.path.copy()
+    sys.path.insert(0, scripts_dir)
+    try:
+        from evaluate import _load_agent
+        agent = DQNAgent(state_dim=6, hidden_sizes=[16], use_noisy=True, seed=42)
+        model_path = str(tmp_path / "noisy_model.npz")
+        agent.save(model_path)
+
+        args = argparse.Namespace(model_path=model_path)
+        loaded = _load_agent(args)
+        assert loaded.use_noisy is True
+    finally:
+        sys.path[:] = orig_path
