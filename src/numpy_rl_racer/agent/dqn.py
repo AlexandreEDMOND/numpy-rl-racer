@@ -281,6 +281,7 @@ class DQNAgent:
         params["use_dueling_dqn"] = np.array(1 if self.use_dueling_dqn else 0)
         params["state_dim"] = np.array(self.state_dim)
         params["n_actions"] = np.array(N_ACTIONS)
+        params["use_noisy"] = np.array(1 if self.use_noisy else 0)
         np.savez(path, **params)
 
     def load(self, path):
@@ -312,6 +313,19 @@ class DQNAgent:
                     f"Saved model state_dim={saved_state_dim} does not match "
                     f"agent state_dim={self.state_dim}"
                 )
+            saved_use_noisy = int(data["use_noisy"]) if "use_noisy" in data.files else 0
+            expected_use_noisy = 1 if self.use_noisy else 0
+            if saved_use_noisy != expected_use_noisy:
+                if saved_use_noisy == 1:
+                    raise ValueError(
+                        "Saved model uses NoisyNet (use_noisy=True) but agent "
+                        "was constructed with use_noisy=False"
+                    )
+                else:
+                    raise ValueError(
+                        "Saved model does not use NoisyNet (use_noisy=False) "
+                        "but agent was constructed with use_noisy=True"
+                    )
         else:
             warnings.warn(
                 "Loaded checkpoint does not contain architecture metadata. "
