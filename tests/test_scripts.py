@@ -2102,3 +2102,101 @@ def test_evaluate_loads_noisy_checkpoint(tmp_path):
         assert loaded.use_noisy is True
     finally:
         sys.path[:] = orig_path
+
+
+# ---------------------------------------------------------------------------
+# Loss type (--loss-type / --huber-delta) tests
+# ---------------------------------------------------------------------------
+
+def _parse_loss_type_args(args=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--loss-type", choices=["mse", "huber"], default="mse")
+    parser.add_argument("--huber-delta", type=float, default=1.0)
+    return parser.parse_args(args)
+
+
+def test_train_loss_type_default_mse():
+    parsed = _parse_loss_type_args([])
+    assert parsed.loss_type == "mse"
+    assert parsed.huber_delta == 1.0
+
+
+def test_train_loss_type_huber_parsed():
+    parsed = _parse_loss_type_args(["--loss-type", "huber", "--huber-delta", "1.0"])
+    assert parsed.loss_type == "huber"
+    assert parsed.huber_delta == 1.0
+
+
+def test_train_loss_type_invalid_rejected():
+    with pytest.raises(SystemExit):
+        _parse_loss_type_args(["--loss-type", "rmse"])
+
+
+def test_train_loss_type_huber_passed_to_agent(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--loss-type", "huber",
+            "--huber-delta", "1.0",
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["loss_type"] == "huber"
+    assert kwargs["huber_delta"] == 1.0
+
+
+def test_train_loss_type_default_passed_to_agent(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["loss_type"] == "mse"
+    assert kwargs["huber_delta"] == 1.0
+
+
+def test_train_loss_type_huber_runs(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--loss-type", "huber",
+            "--huber-delta", "1.0",
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    config_path = os.path.join(tmp_path, "config.json")
+    assert os.path.exists(config_path)
+    with open(config_path) as f:
+        cfg = json.load(f)
+    assert cfg["loss_type"] == "huber"
+    assert cfg["huber_delta"] == 1.0

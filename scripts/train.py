@@ -286,6 +286,10 @@ def main(argv=None):
                         help="Allow coast/brake actions. Default v0 baseline uses accelerating actions only.")
     parser.add_argument("--checkpoint-freq", type=int, default=0,
                         help="Save a checkpoint every N training episodes (0 = disabled, default: 0)")
+    parser.add_argument("--loss-type", choices=["mse", "huber"], default="mse",
+                        help="TD-error loss type: mse (default) or huber (smooth-L1)")
+    parser.add_argument("--huber-delta", type=float, default=1.0,
+                        help="Delta for Huber/smooth-L1 loss (default: 1.0)")
 
     known_args, _ = parser.parse_known_args(argv)
     if known_args.config:
@@ -403,6 +407,8 @@ def main(argv=None):
         optimizer=args.optimizer,
         betas=(args.adam_beta1, args.adam_beta2),
         eps=args.adam_eps,
+        loss_type=args.loss_type,
+        huber_delta=args.huber_delta,
     )
 
     scheduler_str = args.lr_scheduler if args.lr_scheduler != "none" else "none"
@@ -417,7 +423,8 @@ def main(argv=None):
             f"reward_mode={args.reward_mode}, state_dim={state_dim}, "
             f"allow_idle_actions={args.allow_idle_actions}, "
             f"optimizer={args.optimizer}, "
-            f"adam_beta1={args.adam_beta1}, adam_beta2={args.adam_beta2}, adam_eps={args.adam_eps}"
+            f"adam_beta1={args.adam_beta1}, adam_beta2={args.adam_beta2}, adam_eps={args.adam_eps}, "
+            f"loss_type={args.loss_type}, huber_delta={args.huber_delta}"
     )
 
     _ctx = nullcontext()
