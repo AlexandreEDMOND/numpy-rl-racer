@@ -1,7 +1,13 @@
 import numpy as np
+import pytest
 
 from numpy_rl_racer.network import Dense, DuelingMLP, MLP, NoisyLinear, SGD, Adam, mse_loss, relu
-from numpy_rl_racer.utils.scheduler import ExponentialDecay, LRScheduler, StepDecay
+from numpy_rl_racer.utils.scheduler import (
+    CosineAnnealingLR,
+    ExponentialDecay,
+    LRScheduler,
+    StepDecay,
+)
 
 
 def test_relu_positive():
@@ -235,6 +241,94 @@ class TestStepDecay:
         for _ in range(4):
             sched.step()
         assert sched.lr == 1.0
+
+
+class TestCosineAnnealingLR:
+    def test_lr_at_step_zero_is_initial_lr(self):
+        sched = CosineAnnealingLR(0.1, eta_min=0.0, t_max=100)
+        assert sched.lr == 0.1
+
+    def test_lr_equals_eta_min_after_t_max_steps(self):
+        sched = CosineAnnealingLR(0.1, eta_min=1e-4, t_max=100)
+        for _ in range(100):
+            sched.step()
+        np.testing.assert_allclose(sched.lr, 1e-4, atol=1e-12)
+
+    def test_lr_is_monotonically_non_increasing_and_above_eta_min(self):
+        sched = CosineAnnealingLR(0.1, eta_min=1e-4, t_max=50)
+        prev = sched.lr
+        for _ in range(2 * 50):
+            sched.step()
+            assert sched.lr <= prev + 1e-15
+            assert sched.lr >= 0.0
+            prev = sched.lr
+
+    def test_pins_at_eta_min_after_t_max(self):
+        sched = CosineAnnealingLR(0.1, eta_min=1e-4, t_max=50)
+        for _ in range(int(1.5 * 50)):
+            sched.step()
+        np.testing.assert_allclose(sched.lr, 1e-4, atol=1e-12)
+        for _ in range(50):
+            sched.step()
+        np.testing.assert_allclose(sched.lr, 1e-4, atol=1e-12)
+
+    def test_t_max_below_one_raises(self):
+        with pytest.raises(ValueError, match="t_max"):
+            CosineAnnealingLR(0.1, eta_min=0.0, t_max=0)
+
+
+class TestSGDCosineAnnealing:
+    def test_sgd_with_cosine_scheduler_decreases_lr(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(2, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(2, 1))
+        sched = CosineAnnealingLR(0.1, eta_min=0.0, t_max=10)
+        opt = SGD(mlp, scheduler=sched)
+        lrs = []
+        for _ in range(10):
+            opt.step()
+            lrs.append(opt.lr)
+        assert lrs[-1] < lrs[0]
+        np.testing.assert_allclose(opt.lr, 0.0, atol=1e-12)
+
+    def test_sgd_with_cosine_scheduler_pins_at_eta_min(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(2, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(2, 1))
+        sched = CosineAnnealingLR(0.1, eta_min=1e-4, t_max=8)
+        opt = SGD(mlp, scheduler=sched)
+        for _ in range(12):
+            opt.step()
+        np.testing.assert_allclose(opt.lr, 1e-4, atol=1e-12)
+
+
+class TestAdamCosineAnnealing:
+    def test_adam_with_cosine_scheduler_decreases_lr(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(2, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(2, 1))
+        sched = CosineAnnealingLR(0.1, eta_min=0.0, t_max=10)
+        opt = Adam(mlp, scheduler=sched)
+        lrs = []
+        for _ in range(10):
+            opt.step()
+            lrs.append(opt.lr)
+        assert lrs[-1] < lrs[0]
+        np.testing.assert_allclose(opt.lr, 0.0, atol=1e-12)
+
+    def test_adam_with_cosine_scheduler_pins_at_eta_min(self):
+        mlp = MLP([2, 4, 1])
+        x = np.random.randn(2, 2)
+        mlp.forward(x)
+        mlp.backward(np.random.randn(2, 1))
+        sched = CosineAnnealingLR(0.1, eta_min=1e-4, t_max=8)
+        opt = Adam(mlp, scheduler=sched)
+        for _ in range(16):
+            opt.step()
+        np.testing.assert_allclose(opt.lr, 1e-4, atol=1e-12)
 
 
 class TestSGDWithScheduler:

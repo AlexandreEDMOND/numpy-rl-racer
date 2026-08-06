@@ -347,9 +347,11 @@ def _make_main():
 
 def _parse_scheduler_args(args=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--lr-scheduler", choices=["none", "exponential", "step"], default="none")
+    parser.add_argument("--lr-scheduler", choices=["none", "exponential", "step", "cosine"], default="none")
     parser.add_argument("--lr-decay", type=float, default=0.99)
     parser.add_argument("--lr-drop-every", type=int, default=100)
+    parser.add_argument("--lr-cosine-tmax", type=int, default=100000)
+    parser.add_argument("--lr-cosine-eta-min", type=float, default=0.0)
     return parser.parse_args(args)
 
 
@@ -475,6 +477,93 @@ def test_lr_drop_every_default():
 def test_lr_drop_every_custom():
     parsed = _parse_scheduler_args(["--lr-scheduler", "step", "--lr-drop-every", "50"])
     assert parsed.lr_drop_every == 50
+
+
+def test_lr_scheduler_cosine():
+    parsed = _parse_scheduler_args(["--lr-scheduler", "cosine"])
+    assert parsed.lr_scheduler == "cosine"
+
+
+def test_lr_scheduler_invalid_rejected():
+    with pytest.raises(SystemExit):
+        _parse_scheduler_args(["--lr-scheduler", "rmsprop"])
+
+
+def test_lr_cosine_tmax_default():
+    parsed = _parse_scheduler_args(["--lr-scheduler", "cosine"])
+    assert parsed.lr_cosine_tmax == 100000
+    assert parsed.lr_cosine_eta_min == 0.0
+
+
+def test_lr_cosine_tmax_custom():
+    parsed = _parse_scheduler_args([
+        "--lr-scheduler", "cosine",
+        "--lr-cosine-tmax", "50",
+        "--lr-cosine-eta-min", "1e-4",
+    ])
+    assert parsed.lr_cosine_tmax == 50
+    assert parsed.lr_cosine_eta_min == 1e-4
+
+
+def test_train_lr_scheduler_cosine_runs(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0):
+        main([
+            "--lr-scheduler", "cosine",
+            "--lr-cosine-tmax", "10",
+            "--episodes", "1",
+            "--max-steps", "5",
+            "--save-dir", str(tmp_path),
+        ])
+    config_path = os.path.join(tmp_path, "config.json")
+    assert os.path.exists(config_path)
+    with open(config_path) as f:
+        cfg = json.load(f)
+    assert cfg["lr_scheduler"] == "cosine"
+    assert cfg["lr_cosine_tmax"] == 10
+    assert cfg["lr_cosine_eta_min"] == 0.0
+    final_model = os.path.join(tmp_path, "final_model.npz")
+    assert os.path.exists(final_model)
+    best_model = os.path.join(tmp_path, "best_model.npz")
+    assert os.path.exists(best_model)
+    curve = os.path.join(tmp_path, "training_curve.png")
+    assert os.path.exists(curve)
+
+
+def test_train_lr_cosine_tmax_zero_rejected(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        with pytest.raises(ValueError, match="--lr-cosine-tmax"):
+            main([
+                "--lr-scheduler", "cosine",
+                "--lr-cosine-tmax", "0",
+                "--episodes", "1",
+                "--max-steps", "1",
+                "--save-dir", str(tmp_path),
+            ])
+
+
+def test_train_lr_scheduler_cosine_eta_min_persisted(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--lr-scheduler", "cosine",
+            "--lr-cosine-tmax", "50",
+            "--lr-cosine-eta-min", "1e-4",
+            "--episodes", "2",
+            "--max-steps", "5",
+            "--save-dir", str(tmp_path),
+        ])
+    with open(os.path.join(tmp_path, "config.json")) as f:
+        cfg = json.load(f)
+    assert cfg["lr_scheduler"] == "cosine"
+    assert cfg["lr_cosine_tmax"] == 50
+    assert cfg["lr_cosine_eta_min"] == 1e-4
 
 
 def test_train_hyperparameters_passed_to_agent(tmp_path):

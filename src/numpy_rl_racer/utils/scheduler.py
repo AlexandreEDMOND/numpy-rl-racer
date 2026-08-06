@@ -1,3 +1,6 @@
+import numpy as np
+
+
 class LRScheduler:
     def __init__(self, initial_lr):
         self.lr = initial_lr
@@ -26,3 +29,20 @@ class StepDecay(LRScheduler):
         self._steps += 1
         if self._steps % self.drop_every == 0:
             self.lr *= self.drop_rate
+
+
+class CosineAnnealingLR(LRScheduler):
+    def __init__(self, initial_lr, eta_min=0.0, t_max=100000):
+        super().__init__(initial_lr)
+        if t_max < 1:
+            raise ValueError(f"t_max must be >= 1, got {t_max}")
+        self.initial_lr = initial_lr
+        self.eta_min = eta_min
+        self.t_max = t_max
+        self._steps = 0
+
+    def step(self):
+        self._steps += 1
+        capped = min(self._steps, self.t_max)
+        self.lr = self.eta_min + 0.5 * (self.initial_lr - self.eta_min) * \
+            (1.0 + np.cos(np.pi * capped / self.t_max))

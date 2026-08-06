@@ -1,3 +1,3 @@
-from .scheduler import ExponentialDecay, LRScheduler, StepDecay
+from .scheduler import CosineAnnealingLR, ExponentialDecay, LRScheduler, StepDecay
 
-__all__ = ["ExponentialDecay", "LRScheduler", "StepDecay"]
+__all__ = ["CosineAnnealingLR", "ExponentialDecay", "LRScheduler", "StepDecay"]
