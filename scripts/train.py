@@ -8,7 +8,7 @@ import numpy as np
 from numpy_rl_racer.agent import DQNAgent, ACTIONS
 from numpy_rl_racer.env import Obstacle, ProceduralTrack, RacingEnv, TrackPoolEnv
 from numpy_rl_racer.env.wrappers import ActionRepeatEnv
-from numpy_rl_racer.utils.scheduler import ExponentialDecay, StepDecay
+from numpy_rl_racer.utils.scheduler import CosineAnnealingLR, ExponentialDecay, StepDecay
 
 
 ACCELERATING_ACTIONS = {0, 1, 2}
@@ -245,12 +245,16 @@ def main(argv=None):
                         help="Enable NoisyNet exploration (replaces output layers with NoisyLinear)")
     parser.add_argument("--n-step", type=int, default=1,
                         help="N-step returns for TD target (default: 1)")
-    parser.add_argument("--lr-scheduler", choices=["none", "exponential", "step"],
+    parser.add_argument("--lr-scheduler", choices=["none", "exponential", "step", "cosine"],
                         default="none", help="Learning rate scheduler type (default: none)")
     parser.add_argument("--lr-decay", type=float, default=0.99,
                         help="Decay rate for exponential scheduler, drop factor for step scheduler (default: 0.99)")
     parser.add_argument("--lr-drop-every", type=int, default=100,
                         help="Steps between LR drops for step scheduler (default: 100)")
+    parser.add_argument("--lr-cosine-tmax", type=int, default=100000,
+                        help="Total steps over which the cosine scheduler anneals LR (default: 100000)")
+    parser.add_argument("--lr-cosine-eta-min", type=float, default=0.0,
+                        help="Minimum LR for the cosine scheduler (default: 0.0)")
     parser.add_argument("--optimizer", choices=["sgd", "adam"], default="sgd",
                         help="Optimizer type: sgd (default) or adam")
     parser.add_argument("--adam-beta1", type=float, default=0.9,
@@ -398,6 +402,8 @@ def main(argv=None):
 
     if not (0.0 <= args.tau <= 1.0):
         raise ValueError(f"--tau must be in [0.0, 1.0], got {args.tau}")
+    if args.lr_cosine_tmax < 1:
+        raise ValueError(f"--lr-cosine-tmax must be >= 1, got {args.lr_cosine_tmax}")
 
     print(f"Track type: {args.track}")
     scheduler = None
@@ -405,6 +411,8 @@ def main(argv=None):
         scheduler = ExponentialDecay(args.lr, args.lr_decay)
     elif args.lr_scheduler == "step":
         scheduler = StepDecay(args.lr, args.lr_decay, args.lr_drop_every)
+    elif args.lr_scheduler == "cosine":
+        scheduler = CosineAnnealingLR(args.lr, args.lr_cosine_eta_min, args.lr_cosine_tmax)
     state_dim = env.observation_dim
     agent = DQNAgent(
         state_dim=state_dim,
@@ -451,7 +459,8 @@ def main(argv=None):
             f"optimizer={args.optimizer}, "
             f"adam_beta1={args.adam_beta1}, adam_beta2={args.adam_beta2}, adam_eps={args.adam_eps}, "
             f"loss_type={args.loss_type}, huber_delta={args.huber_delta}, "
-            f"max_grad_norm={args.max_grad_norm}"
+            f"max_grad_norm={args.max_grad_norm}, "
+            f"lr_cosine_tmax={args.lr_cosine_tmax}, lr_cosine_eta_min={args.lr_cosine_eta_min}"
     )
 
     _ctx = nullcontext()
