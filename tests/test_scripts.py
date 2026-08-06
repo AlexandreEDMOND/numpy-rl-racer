@@ -2397,3 +2397,189 @@ def test_train_loss_type_huber_runs(tmp_path):
         cfg = json.load(f)
     assert cfg["loss_type"] == "huber"
     assert cfg["huber_delta"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Soft target-network updates (--tau) tests
+# ---------------------------------------------------------------------------
+
+def _parse_tau_args(args=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--tau", type=float, default=0.0)
+    return parser.parse_args(args)
+
+
+def test_train_tau_default_zero():
+    parsed = _parse_tau_args([])
+    assert parsed.tau == 0.0
+
+
+def test_train_tau_parsed():
+    parsed = _parse_tau_args(["--tau", "0.005"])
+    assert parsed.tau == 0.005
+
+
+def test_train_tau_default_zero_passed_to_agent(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    assert captured[0]["tau"] == 0.0
+
+
+def test_train_tau_passed_to_agent(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--tau", "0.005",
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+
+    assert captured[0]["tau"] == 0.005
+
+
+def test_train_tau_persisted_to_config(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--tau", "0.005",
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    with open(os.path.join(tmp_path, "config.json")) as f:
+        cfg = json.load(f)
+    assert cfg["tau"] == 0.005
+
+
+def test_train_tau_default_zero_in_config(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+        ])
+    with open(os.path.join(tmp_path, "config.json")) as f:
+        cfg = json.load(f)
+    assert cfg["tau"] == 0.0
+
+
+def test_train_tau_round_trip_via_config(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    save_dir = tmp_path / "first"
+    save_dir.mkdir()
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--tau", "0.005",
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(save_dir),
+        ])
+
+    assert captured[0]["tau"] == 0.005
+    with open(os.path.join(save_dir, "config.json")) as f:
+        cfg = json.load(f)
+    assert cfg["tau"] == 0.005
+
+    captured.clear()
+    reloaded_dir = tmp_path / "second"
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--config", os.path.join(save_dir, "config.json"),
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(reloaded_dir),
+        ])
+
+    assert captured[0]["tau"] == 0.005
+
+
+def test_train_tau_invalid_negative(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        with pytest.raises(ValueError, match="--tau must be in"):
+            main([
+                "--tau", "-0.1",
+                "--episodes", "1",
+                "--max-steps", "1",
+                "--save-dir", str(tmp_path),
+            ])
+
+
+def test_train_tau_invalid_above_one(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        with pytest.raises(ValueError, match="--tau must be in"):
+            main([
+                "--tau", "1.5",
+                "--episodes", "1",
+                "--max-steps", "1",
+                "--save-dir", str(tmp_path),
+            ])
+
+
+def test_train_tau_soft_update_runs(tmp_path):
+    main = _make_main()
+    with patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0):
+        main([
+            "--tau", "0.005",
+            "--episodes", "2",
+            "--max-steps", "3",
+            "--save-dir", str(tmp_path),
+        ])
+    config_path = os.path.join(tmp_path, "config.json")
+    assert os.path.exists(config_path)
+    with open(config_path) as f:
+        cfg = json.load(f)
+    assert cfg["tau"] == 0.005
+    final_model = os.path.join(tmp_path, "final_model.npz")
+    assert os.path.exists(final_model)
