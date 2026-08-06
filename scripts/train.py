@@ -290,6 +290,9 @@ def main(argv=None):
                         help="TD-error loss type: mse (default) or huber (smooth-L1)")
     parser.add_argument("--huber-delta", type=float, default=1.0,
                         help="Delta for Huber/smooth-L1 loss (default: 1.0)")
+    parser.add_argument("--max-grad-norm", type=float, default=None,
+                        help="Global L2 gradient-norm clipping threshold "
+                             "(default: None disables clipping)")
 
     known_args, _ = parser.parse_known_args(argv)
     if known_args.config:
@@ -409,6 +412,7 @@ def main(argv=None):
         eps=args.adam_eps,
         loss_type=args.loss_type,
         huber_delta=args.huber_delta,
+        max_grad_norm=args.max_grad_norm,
     )
 
     scheduler_str = args.lr_scheduler if args.lr_scheduler != "none" else "none"
@@ -424,7 +428,8 @@ def main(argv=None):
             f"allow_idle_actions={args.allow_idle_actions}, "
             f"optimizer={args.optimizer}, "
             f"adam_beta1={args.adam_beta1}, adam_beta2={args.adam_beta2}, adam_eps={args.adam_eps}, "
-            f"loss_type={args.loss_type}, huber_delta={args.huber_delta}"
+            f"loss_type={args.loss_type}, huber_delta={args.huber_delta}, "
+            f"max_grad_norm={args.max_grad_norm}"
     )
 
     _ctx = nullcontext()
