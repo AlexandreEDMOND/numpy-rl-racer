@@ -679,6 +679,107 @@ def test_eval_training_curve_generated(tmp_path):
     assert os.path.getsize(curve_path) > 0
 
 
+def _read_training_log(tmp_path):
+    log_path = os.path.join(tmp_path, "training_log.csv")
+    assert os.path.exists(log_path), "training_log.csv was not written"
+    with open(log_path, newline="") as f:
+        reader = csv.DictReader(f)
+        fieldnames = list(reader.fieldnames)
+        rows = list(reader)
+    return fieldnames, rows
+
+
+def test_train_csv_includes_progress_and_laps_columns(tmp_path):
+    main = _make_main()
+    real_init = DQNAgent.__init__
+    with patch.object(DQNAgent, "__init__", lambda self, **kwargs: real_init(self, **kwargs)), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--log-dir", str(tmp_path),
+        ])
+    fieldnames, _ = _read_training_log(tmp_path)
+    assert "mean_progress" in fieldnames
+    assert "laps_completed" in fieldnames
+
+
+def test_train_csv_progress_columns_appended_after_collision(tmp_path):
+    main = _make_main()
+    real_init = DQNAgent.__init__
+    with patch.object(DQNAgent, "__init__", lambda self, **kwargs: real_init(self, **kwargs)), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--log-dir", str(tmp_path),
+            "--eval-freq", "1",
+            "--eval-episodes", "1",
+        ])
+    fieldnames, _ = _read_training_log(tmp_path)
+    assert fieldnames.index("collision_steps") < fieldnames.index("mean_progress")
+    assert fieldnames.index("mean_progress") < fieldnames.index("laps_completed")
+    assert fieldnames.index("laps_completed") < fieldnames.index("eval_reward_mean")
+    # Regression: existing column still in its prior relative position.
+    assert fieldnames.index("off_track_steps") < fieldnames.index("collision_steps")
+
+
+def test_train_progress_column_numeric_value(tmp_path):
+    main = _make_main()
+    real_init = DQNAgent.__init__
+    with patch.object(DQNAgent, "__init__", lambda self, **kwargs: real_init(self, **kwargs)), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "2",
+            "--save-dir", str(tmp_path),
+            "--log-dir", str(tmp_path),
+        ])
+    _, rows = _read_training_log(tmp_path)
+    assert len(rows) == 1
+    progress = float(rows[0]["mean_progress"])
+    assert 0.0 <= progress <= 1.0
+    laps = int(rows[0]["laps_completed"])
+    assert laps >= 0
+
+
+def test_train_curve_has_four_panels(tmp_path):
+    main = _make_main()
+    real_init = DQNAgent.__init__
+    captured = {}
+
+    import matplotlib.pyplot as plt
+
+    real_subplots = plt.subplots
+
+    def tracking_subplots(nrows=1, ncols=1, **kwargs):
+        captured["nrows"] = nrows
+        return real_subplots(nrows, ncols, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", lambda self, **kwargs: real_init(self, **kwargs)), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"), \
+         patch.object(plt, "subplots", tracking_subplots):
+        main([
+            "--episodes", "3",
+            "--max-steps", "2",
+            "--save-dir", str(tmp_path),
+        ])
+    curve_path = os.path.join(tmp_path, "training_curve.png")
+    assert os.path.exists(curve_path)
+    assert os.path.getsize(curve_path) > 0
+    assert captured.get("nrows") == 4
+
+
 def test_config_file_not_found(tmp_path):
     main = _make_main()
     cfg = tmp_path / "nonexistent.json"

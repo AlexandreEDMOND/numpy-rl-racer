@@ -80,17 +80,33 @@ def _generate_obstacles(track, num_obstacles, seed=None):
 
 def plot_training(episode_rewards, episode_losses, save_dir,
                   eval_at_episodes=None, eval_reward_means=None, eval_reward_stds=None,
-                  off_track_rates=None, collision_steps=None):
+                  off_track_rates=None, collision_steps=None,
+                  mean_progress=None, laps_completed=None):
     import matplotlib.pyplot as plt
 
     has_off_track = off_track_rates is not None and len(off_track_rates) > 0
-    n_rows = 3 if has_off_track else 2
-    fig, axes = plt.subplots(n_rows, 1, figsize=(10, 11 if has_off_track else 8))
-    if n_rows == 2:
-        ax1, ax2 = axes
-        ax3 = None
-    else:
-        ax1, ax2, ax3 = axes
+    has_progress = mean_progress is not None and len(mean_progress) > 0
+    n_rows = 2
+    if has_off_track:
+        n_rows += 1
+    if has_progress:
+        n_rows += 1
+    fig_height = 4 * n_rows - 1
+    fig, axes = plt.subplots(n_rows, 1, figsize=(10, fig_height))
+    if n_rows == 1:
+        axes = [axes]
+    axes = list(axes)
+
+    ax1 = axes[0]
+    ax2 = axes[1]
+    next_idx = 2
+    ax3 = None
+    ax4 = None
+    if has_off_track:
+        ax3 = axes[next_idx]
+        next_idx += 1
+    if has_progress:
+        ax4 = axes[next_idx]
 
     ax1.plot(episode_rewards, alpha=0.4, label="Episode Reward", color="blue")
     if len(episode_rewards) >= 20:
@@ -133,6 +149,27 @@ def plot_training(episode_rewards, episode_losses, save_dir,
         ax3.set_title("Off-track Rate / Collisions")
         ax3.legend(loc="upper left")
         ax3.grid(True, alpha=0.3)
+
+    if ax4 is not None:
+        ax4.plot(np.asarray(mean_progress), alpha=0.4,
+                 label="Mean Progress", color="teal")
+        if len(mean_progress) >= 20:
+            smoothed_p = np.convolve(mean_progress, np.ones(20) / 20, mode="valid")
+            ax4.plot(np.arange(19, len(mean_progress)), smoothed_p,
+                     "g-", linewidth=2, label="Moving avg (20 ep)")
+        ax4.set_xlabel("Episode")
+        ax4.set_ylabel("Mean Progress")
+        ax4.set_title("Per-episode Mean Progress / Laps")
+        ax4.set_ylim(0.0, 1.0)
+        ax4.legend(loc="upper left")
+        ax4.grid(True, alpha=0.3)
+        if laps_completed is not None and len(laps_completed) > 0:
+            ax4_twin = ax4.twinx()
+            ax4_twin.step(np.arange(len(laps_completed)),
+                          np.asarray(laps_completed), where="mid",
+                          color="purple", alpha=0.6, label="Laps")
+            ax4_twin.set_ylabel("Laps Completed")
+            ax4_twin.legend(loc="upper right")
 
     plt.tight_layout()
     path = os.path.join(save_dir, "training_curve.png")
@@ -385,7 +422,7 @@ def main(argv=None):
     if args.log_dir:
         from numpy_rl_racer.utils.logging import TrainingLogger
         fieldnames = ["episode", "total_reward", "steps", "avg_loss", "epsilon", "avg_q_value", "elapsed_time",
-                      "off_track_steps", "collision_steps"]
+                      "off_track_steps", "collision_steps", "mean_progress", "laps_completed"]
         if args.eval_freq > 0:
             fieldnames.extend(["eval_reward_mean", "eval_reward_std"])
         if args.lr_scheduler != "none":
@@ -398,6 +435,8 @@ def main(argv=None):
     episode_losses = []
     episode_off_track_rates = []
     episode_collision_steps = []
+    episode_mean_progress = []
+    episode_laps_completed = []
     best_reward = -float("inf")
     best_eval_reward = -float("inf")
     eval_at_episodes = []
@@ -415,6 +454,8 @@ def main(argv=None):
             ep_q_vals = []
             off_track_steps = 0
             collision_steps = 0
+            ep_progresses = []
+            ep_lap_count = 0
 
             for step in range(args.max_steps):
                 action_idx = _select_action(
@@ -430,6 +471,10 @@ def main(argv=None):
                     off_track_steps += 1
                 if info.get("collision"):
                     collision_steps += 1
+                if "progress" in info:
+                    ep_progresses.append(float(info["progress"]))
+                if "lap_count" in info:
+                    ep_lap_count = int(info["lap_count"])
                 if loss > 0:
                     ep_losses.append(loss)
                     ep_q_vals.append(agent._last_avg_q)
@@ -439,12 +484,16 @@ def main(argv=None):
 
             steps_taken = step + 1
             off_track_rate = off_track_steps / steps_taken if steps_taken > 0 else 0.0
+            mean_progress = float(np.mean(ep_progresses)) if ep_progresses else 0.0
+            laps_completed = ep_lap_count
             avg_loss = np.mean(ep_losses) if ep_losses else float("nan")
             avg_q = np.mean(ep_q_vals) if ep_q_vals else float("nan")
             episode_rewards.append(ep_reward)
             episode_losses.append(avg_loss)
             episode_off_track_rates.append(off_track_rate)
             episode_collision_steps.append(collision_steps)
+            episode_mean_progress.append(mean_progress)
+            episode_laps_completed.append(laps_completed)
 
             print(
                 f"ep={ep:4d}/{args.episodes}  "
@@ -464,6 +513,8 @@ def main(argv=None):
                 elapsed_time=info.get('elapsed_time', 0.0),
                 off_track_steps=off_track_steps,
                 collision_steps=collision_steps,
+                mean_progress=mean_progress,
+                laps_completed=laps_completed,
             )
             if args.lr_scheduler != "none":
                 log_kwargs["lr"] = agent.optimizer.lr
@@ -518,7 +569,9 @@ def main(argv=None):
                   eval_reward_means=eval_reward_means,
                   eval_reward_stds=eval_reward_stds,
                   off_track_rates=episode_off_track_rates,
-                  collision_steps=episode_collision_steps)
+                  collision_steps=episode_collision_steps,
+                  mean_progress=episode_mean_progress,
+                  laps_completed=episode_laps_completed)
 
 
 if __name__ == "__main__":
