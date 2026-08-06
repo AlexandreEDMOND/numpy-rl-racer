@@ -219,6 +219,12 @@ def main(argv=None):
                         help="Epsilon decay rate per step")
     parser.add_argument("--target-update-freq", type=int, default=100,
                         help="Target network update frequency (steps)")
+    parser.add_argument("--tau", type=float, default=0.0,
+                        help="Soft (Polyak) target-network update coefficient. "
+                             "When > 0 the target net is updated every step via "
+                             "dst = tau * src + (1 - tau) * dst and "
+                             "--target-update-freq is ignored. "
+                             "0.0 (default) keeps the existing hard-update schedule.")
     parser.add_argument("--double-dqn", action="store_true", default=False,
                         help="Enable Double DQN (disabled by default for the v0 baseline)")
     parser.add_argument("--no-double-dqn", action="store_false", dest="double_dqn",
@@ -390,6 +396,9 @@ def main(argv=None):
     elif args.skip_frames < 1:
         raise ValueError(f"--skip-frames must be >= 1, got {args.skip_frames}")
 
+    if not (0.0 <= args.tau <= 1.0):
+        raise ValueError(f"--tau must be in [0.0, 1.0], got {args.tau}")
+
     print(f"Track type: {args.track}")
     scheduler = None
     if args.lr_scheduler == "exponential":
@@ -408,6 +417,7 @@ def main(argv=None):
         buffer_size=args.buffer_size,
         batch_size=args.batch_size,
         target_update_freq=args.target_update_freq,
+        tau=args.tau,
         use_double_dqn=args.double_dqn,
         use_per=args.use_per,
         alpha=args.per_alpha,
@@ -432,6 +442,7 @@ def main(argv=None):
         f"hidden_sizes={args.hidden_sizes}, buffer_size={args.buffer_size}, "
         f"epsilon_start={args.epsilon_start}, epsilon_min={args.epsilon_min}, "
         f"epsilon_decay={args.epsilon_decay}, target_update_freq={args.target_update_freq}, "
+        f"tau={args.tau}, "
         f"double_dqn={args.double_dqn}, use_per={args.use_per}, "
         f"dueling_dqn={args.dueling_dqn}, noisy_net={args.noisy_net}, n_step={args.n_step}, "
         f"lr_scheduler={scheduler_str}, observation_mode={args.observation_mode}, "
