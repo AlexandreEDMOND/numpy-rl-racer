@@ -523,6 +523,120 @@ def test_train_hyperparameters_passed_to_agent(tmp_path):
     assert kwargs["seed"] is None
 
 
+def test_train_per_hyperparameters_passed_to_agent(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--use-per",
+            "--per-alpha", "0.5",
+            "--per-beta0", "0.6",
+            "--per-beta-anneal-steps", "1000",
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["use_per"] is True
+    assert kwargs["alpha"] == 0.5
+    assert kwargs["beta0"] == 0.6
+    assert kwargs["beta_anneal_steps"] == 1000
+
+
+def test_train_per_hyperparameters_default_when_use_per(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(tmp_path),
+            "--use-per",
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["use_per"] is True
+    assert kwargs["alpha"] == 0.6
+    assert kwargs["beta0"] == 0.4
+    assert kwargs["beta_anneal_steps"] == 100000
+
+
+def test_train_per_hyperparameters_round_trip_via_config(tmp_path):
+    main = _make_main()
+    captured = []
+    real_init = DQNAgent.__init__
+
+    def tracking_init(self, **kwargs):
+        captured.append(kwargs)
+        real_init(self, **kwargs)
+
+    save_dir = tmp_path / "first"
+    save_dir.mkdir()
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(save_dir),
+            "--use-per",
+            "--per-alpha", "0.5",
+            "--per-beta0", "0.6",
+            "--per-beta-anneal-steps", "1000",
+        ])
+
+    assert captured[0]["alpha"] == 0.5
+    assert captured[0]["beta0"] == 0.6
+    assert captured[0]["beta_anneal_steps"] == 1000
+
+    with open(os.path.join(save_dir, "config.json")) as f:
+        cfg = json.load(f)
+    assert cfg["per_alpha"] == 0.5
+    assert cfg["per_beta0"] == 0.6
+    assert cfg["per_beta_anneal_steps"] == 1000
+    assert cfg["use_per"] is True
+
+    captured.clear()
+    reloaded_dir = tmp_path / "second"
+    with patch.object(DQNAgent, "__init__", tracking_init), \
+         patch.object(DQNAgent, "act", return_value=0), \
+         patch.object(DQNAgent, "train_step", return_value=0.0), \
+         patch.object(DQNAgent, "save"):
+        main([
+            "--config", os.path.join(save_dir, "config.json"),
+            "--use-per",
+            "--episodes", "1",
+            "--max-steps", "1",
+            "--save-dir", str(reloaded_dir),
+        ])
+
+    kwargs = captured[0]
+    assert kwargs["use_per"] is True
+    assert kwargs["alpha"] == 0.5
+    assert kwargs["beta0"] == 0.6
+    assert kwargs["beta_anneal_steps"] == 1000
+
+
 def test_train_default_hyperparameters(tmp_path):
     main = _make_main()
     captured = []
